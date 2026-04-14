@@ -1,16 +1,46 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Users, Coins, Send, Mic, MicOff, Video, VideoOff, Share2, Heart, Hand, MessageCircle, Star, MoreHorizontal, Shield, Power, Plus, UserPlus, Lock, Unlock, Trophy, Zap } from 'lucide-react';
+import { X, Users, Coins, Send, Mic, MicOff, Video, VideoOff, Share2, Heart, Hand, MessageCircle, Star, MoreHorizontal, Shield, Power, Plus, UserPlus, Lock, Unlock, Trophy, Zap, Check } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { LiveStream, LiveParticipant, LiveMessage } from '../types';
 import { db, auth } from '../firebase';
-import { doc, onSnapshot, updateDoc, collection, addDoc, query, orderBy, limit, serverTimestamp, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc, collection, addDoc, query, orderBy, limit, serverTimestamp, arrayUnion, arrayRemove, setDoc, deleteDoc, getDocs } from 'firebase/firestore';
 
 interface LiveStreamScreenProps {
   live: LiveStream;
   isHost: boolean;
   onClose: () => void;
 }
+
+const VideoStream = ({ stream, muted = false, className, filter = 'none' }: { stream: MediaStream; muted?: boolean; className?: string; filter?: string }) => {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.srcObject = stream;
+  }, [stream]);
+
+  const filterStyles: Record<string, string> = {
+    none: '',
+    sepia: 'sepia(0.8)',
+    grayscale: 'grayscale(1)',
+    beauty: 'contrast(1.1) brightness(1.1) saturate(1.1) blur(0.5px)',
+    warm: 'sepia(0.3) saturate(1.4) hue-rotate(-10deg)',
+    cool: 'saturate(1.2) hue-rotate(10deg) brightness(1.1)',
+    vintage: 'contrast(1.2) brightness(0.9) sepia(0.5) saturate(0.8)',
+    neon: 'contrast(1.5) brightness(1.2) saturate(2) hue-rotate(20deg)'
+  };
+
+  return (
+    <video 
+      ref={videoRef} 
+      autoPlay 
+      playsInline 
+      muted={muted} 
+      className={className} 
+      style={{ filter: filterStyles[filter] }}
+      referrerPolicy="no-referrer" 
+    />
+  );
+};
 
 interface Slot {
   id: number;
@@ -29,7 +59,22 @@ export const LiveStreamScreen: React.FC<LiveStreamScreenProps> = ({ live: initia
   const [showHostControls, setShowHostControls] = useState(false);
   const [selectedParticipantIndex, setSelectedParticipantIndex] = useState<number | null>(null);
   const [selectedUserUid, setSelectedUserUid] = useState<string | null>(null);
+  const [showShareMenu, setShowShareMenu] = useState(false);
+  const [showCopyToast, setShowCopyToast] = useState(false);
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
+  const [videoFilter, setVideoFilter] = useState('none');
+  const [videoQuality, setVideoQuality] = useState<'low' | 'medium' | 'high'>('medium');
+  const [showEffectsMenu, setShowEffectsMenu] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const peerConnections = useRef<Record<string, RTCPeerConnection>>({});
+
+  const iceConfig = {
+    iceServers: [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+    ],
+  };
 
   // Real-time Live State Sync
   useEffect(() => {
@@ -68,9 +113,152 @@ export const LiveStreamScreen: React.FC<LiveStreamScreenProps> = ({ live: initia
     setSlots(newSlots);
   }, [activeSlotCount, live.participants]);
 
+  // Initialize Local Media
+  useEffect(() => {
+    const initMedia = async () => {
+      try {
+        // Stop existing tracks if quality changes
+        localStream?.getTracks().forEach(track => track.stop());
+
+        const getStream = async (withVideo: boolean) => {
+          const constraints = {
+            video: withVideo ? {
+              width: videoQuality === 'high' ? 1280 : videoQuality === 'medium' ? 640 : 320,
+              height: videoQuality === 'high' ? 720 : videoQuality === 'medium' ? 480 : 240,
+              frameRate: videoQuality === 'high' ? 30 : 24
+            } : false,
+            audio: true
+          };
+          return await navigator.mediaDevices.getUserMedia(constraints);
+        };
+
+        let stream: MediaStream;
+        try {
+          stream = await getStream(live.type === 'video');
+        } catch (videoErr) {
+          // Fallback to audio only if video device is not found or fails
+          console.warn("Video device not found or access denied, falling back to audio only:", videoErr);
+          stream = await getStream(false);
+        }
+        
+        setLocalStream(stream);
+
+        // Update tracks in existing peer connections
+        Object.values(peerConnections.current).forEach((pc) => {
+          const peer = pc as RTCPeerConnection;
+          const senders = peer.getSenders();
+          stream.getTracks().forEach(track => {
+            const sender = senders.find(s => s.track?.kind === track.kind);
+            if (sender) sender.replaceTrack(track);
+          });
+        });
+      } catch (err) {
+        console.error("Error accessing media devices:", err);
+      }
+    };
+
+    if (isHost || live.participants?.some(p => p.uid === auth.currentUser?.uid)) {
+      initMedia();
+    }
+
+    return () => {
+      localStream?.getTracks().forEach(track => track.stop());
+    };
+  }, [isHost, live.type, videoQuality]);
+
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // WebRTC Signaling Logic
+  useEffect(() => {
+    if (!auth.currentUser) return;
+
+    const signalingRef = collection(db, 'lives', initialLive.id, 'signaling');
+
+    // Host Logic: Listen for incoming connections from participants
+    if (isHost) {
+      const unsubscribe = onSnapshot(signalingRef, (snapshot) => {
+        snapshot.docChanges().forEach(async (change) => {
+          const data = change.doc.data();
+          const participantId = change.doc.id;
+
+          if (change.type === 'added' || change.type === 'modified') {
+            if (data.offer && !data.answer) {
+              // Handle incoming offer from participant
+              const pc = createPeerConnection(participantId);
+              await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+              const answer = await pc.createAnswer();
+              await pc.setLocalDescription(answer);
+              await updateDoc(doc(signalingRef, participantId), { answer });
+            }
+            
+            if (data.iceCandidate && data.from === 'participant') {
+              const pc = peerConnections.current[participantId];
+              if (pc) await pc.addIceCandidate(new RTCIceCandidate(data.iceCandidate));
+            }
+          }
+        });
+      });
+      return () => unsubscribe();
+    } else {
+      // Participant Logic: Create offer to host
+      const initParticipantPC = async () => {
+        const pc = createPeerConnection('host');
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        
+        await setDoc(doc(signalingRef, auth.currentUser!.uid), {
+          offer,
+          from: 'participant',
+          timestamp: serverTimestamp()
+        });
+
+        const unsubscribe = onSnapshot(doc(signalingRef, auth.currentUser!.uid), async (docSnap) => {
+          const data = docSnap.data();
+          if (data?.answer) {
+            await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+          }
+          if (data?.iceCandidate && data.from === 'host') {
+            await pc.addIceCandidate(new RTCIceCandidate(data.iceCandidate));
+          }
+        });
+        return unsubscribe;
+      };
+
+      const unsubPromise = initParticipantPC();
+      return () => { unsubPromise.then(unsub => unsub()); };
+    }
+  }, [isHost, localStream]);
+
+  const createPeerConnection = (id: string) => {
+    const pc = new RTCPeerConnection(iceConfig);
+    peerConnections.current[id] = pc;
+
+    if (localStream) {
+      localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+    }
+
+    pc.onicecandidate = async (event) => {
+      if (event.candidate && auth.currentUser) {
+        const signalingRef = collection(db, 'lives', initialLive.id, 'signaling');
+        const docId = isHost ? id : auth.currentUser.uid;
+        await updateDoc(doc(signalingRef, docId), {
+          iceCandidate: event.candidate.toJSON(),
+          from: isHost ? 'host' : 'participant'
+        });
+      }
+    };
+
+    pc.ontrack = (event) => {
+      setRemoteStreams(prev => ({
+        ...prev,
+        [id]: event.streams[0]
+      }));
+    };
+
+    return pc;
+  };
 
   const sendMessage = async () => {
     if (!inputText.trim() || !auth.currentUser) return;
@@ -225,6 +413,56 @@ export const LiveStreamScreen: React.FC<LiveStreamScreenProps> = ({ live: initia
     });
   };
 
+  const copyLiveLink = () => {
+    const link = `https://vortex.app/live/${live.id}`;
+    navigator.clipboard.writeText(link);
+    setShowCopyToast(true);
+    setTimeout(() => setShowCopyToast(false), 2000);
+    setShowShareMenu(false);
+  };
+
+  const shareOnSocial = async (platform: string) => {
+    const shareUrl = `https://vortex.app/live/${live.id}`;
+    const shareText = `Assista à live de ${live.creatorName} no VORTEX! ◈`;
+
+    // Try Web Share API first if it's a general share or supported
+    if (platform === 'Share' && navigator.share) {
+      try {
+        await navigator.share({
+          title: 'VORTEX Live',
+          text: shareText,
+          url: shareUrl,
+        });
+        setShowShareMenu(false);
+        return;
+      } catch (err) {
+        console.log('Error sharing:', err);
+      }
+    }
+
+    let url = '';
+    switch (platform) {
+      case 'WhatsApp':
+        url = `https://api.whatsapp.com/send?text=${encodeURIComponent(shareText + ' ' + shareUrl)}`;
+        break;
+      case 'Twitter':
+        url = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(shareUrl)}`;
+        break;
+      case 'Facebook':
+        url = `https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(shareUrl)}`;
+        break;
+      case 'Instagram':
+        // Instagram doesn't have a direct web share URL, so we'll copy the link and notify
+        copyLiveLink();
+        return;
+    }
+
+    if (url) {
+      window.open(url, '_blank');
+      setShowShareMenu(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-[100] bg-black flex flex-col overflow-hidden font-sans">
       {/* Top Bar - Host Info & Stats */}
@@ -270,12 +508,18 @@ export const LiveStreamScreen: React.FC<LiveStreamScreenProps> = ({ live: initia
           )}>
             {live.type === 'video' ? (
               <div className="w-full h-full relative">
-                <img 
-                  src="https://picsum.photos/seed/host_video/600/800" 
-                  alt="host video" 
-                  className="w-full h-full object-cover"
-                  referrerPolicy="no-referrer"
-                />
+                {isHost && localStream ? (
+                  <VideoStream stream={localStream} muted filter={videoFilter} className="w-full h-full object-cover" />
+                ) : remoteStreams['host'] ? (
+                  <VideoStream stream={remoteStreams['host']} className="w-full h-full object-cover" />
+                ) : (
+                  <img 
+                    src="https://picsum.photos/seed/host_video/600/800" 
+                    alt="host video" 
+                    className="w-full h-full object-cover"
+                    referrerPolicy="no-referrer"
+                  />
+                )}
                 <div className="absolute top-2 left-2 glass px-2 py-0.5 rounded text-[8px] font-bold uppercase tracking-widest">Host</div>
                 <div className="absolute bottom-2 left-2 text-[10px] font-bold drop-shadow-lg">{live.creatorName}</div>
               </div>
@@ -319,7 +563,13 @@ export const LiveStreamScreen: React.FC<LiveStreamScreenProps> = ({ live: initia
                   {slot.participant ? (
                     <div className="w-full h-full relative">
                       {live.type === 'video' && !slot.participant.isVideoOff ? (
-                        <img src={slot.participant.photoURL} alt={slot.participant.username} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        remoteStreams[slot.participant.uid] ? (
+                          <VideoStream stream={remoteStreams[slot.participant.uid]} className="w-full h-full object-cover" />
+                        ) : slot.participant.uid === auth.currentUser?.uid && localStream ? (
+                          <VideoStream stream={localStream} muted filter={videoFilter} className="w-full h-full object-cover" />
+                        ) : (
+                          <img src={slot.participant.photoURL} alt={slot.participant.username} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        )
                       ) : (
                         <div className="w-full h-full flex flex-col items-center justify-center bg-vortex-surface p-1">
                           <img src={slot.participant.photoURL} alt={slot.participant.username} className="w-8 h-8 rounded-full object-cover border border-white/10" referrerPolicy="no-referrer" />
@@ -434,18 +684,18 @@ export const LiveStreamScreen: React.FC<LiveStreamScreenProps> = ({ live: initia
           >
             <Coins size={18} />
           </button>
-          <button className="p-2.5 glass rounded-full text-white">
+          <button 
+            onClick={() => setShowShareMenu(true)}
+            className="p-2.5 glass rounded-full text-white hover:bg-white/10 transition-colors"
+          >
             <Share2 size={18} />
           </button>
-          {isHost ? (
+          {isHost || live.participants?.some(p => p.uid === auth.currentUser?.uid) ? (
             <button 
-              onClick={() => setShowHostControls(!showHostControls)}
-              className={cn(
-                "p-2.5 rounded-full text-white transition-all",
-                showHostControls ? "bg-vortex-accent scale-110" : "bg-vortex-accent/40 hover:bg-vortex-accent"
-              )}
+              onClick={() => setShowEffectsMenu(true)}
+              className="p-2.5 bg-vortex-accent rounded-full text-white shadow-lg shadow-vortex-accent/20"
             >
-              <Shield size={18} />
+              <Zap size={18} />
             </button>
           ) : (
             <button className="p-2.5 glass rounded-full text-white">
@@ -636,6 +886,183 @@ export const LiveStreamScreen: React.FC<LiveStreamScreenProps> = ({ live: initia
                 className="py-2 text-xs font-bold text-white/40 hover:text-white transition-colors"
               >
                 Cancelar
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Share Menu */}
+      <AnimatePresence>
+        {showShareMenu && (
+          <div className="absolute inset-0 z-[140] flex items-end justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowShareMenu(false)}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              className="relative w-full max-w-sm glass rounded-t-3xl p-6 space-y-6"
+            >
+              <div className="flex items-center justify-between">
+                <h3 className="font-display font-bold text-lg">Compartilhar Live</h3>
+                <button onClick={() => setShowShareMenu(false)} className="p-2 hover:bg-white/10 rounded-full">
+                  <X size={20} />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-4 gap-4">
+                {[
+                  { name: 'WhatsApp', icon: '📱', color: 'bg-green-500' },
+                  { name: 'Instagram', icon: '📸', color: 'bg-pink-500' },
+                  { name: 'Twitter', icon: '🐦', color: 'bg-blue-400' },
+                  { name: 'Facebook', icon: '👥', color: 'bg-blue-600' },
+                ].map((platform) => (
+                  <button 
+                    key={platform.name}
+                    onClick={() => shareOnSocial(platform.name)}
+                    className="flex flex-col items-center gap-2"
+                  >
+                    <div className={cn("w-12 h-12 rounded-2xl flex items-center justify-center text-2xl shadow-lg", platform.color)}>
+                      {platform.icon}
+                    </div>
+                    <span className="text-[10px] font-bold text-white/60">{platform.name}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="pt-4 border-t border-white/10">
+                <button 
+                  onClick={copyLiveLink}
+                  className="w-full py-4 bg-white/5 hover:bg-white/10 rounded-2xl flex items-center justify-center gap-3 transition-all border border-white/5"
+                >
+                  <Share2 size={18} className="text-vortex-accent" />
+                  <span className="text-sm font-bold">Copiar Link da Live</span>
+                </button>
+              </div>
+
+              <button 
+                onClick={() => setShowShareMenu(false)}
+                className="w-full py-2 text-xs font-bold text-white/40 hover:text-white transition-colors"
+              >
+                Cancelar
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Copy Toast */}
+      <AnimatePresence>
+        {showCopyToast && (
+          <motion.div 
+            initial={{ opacity: 0, y: 50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 50 }}
+            className="absolute bottom-24 left-1/2 -translate-x-1/2 z-[150] bg-vortex-accent px-6 py-3 rounded-full shadow-2xl flex items-center gap-2"
+          >
+            <Check size={16} className="text-white" />
+            <span className="text-xs font-bold text-white">Link copiado com sucesso!</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Effects & Quality Menu */}
+      <AnimatePresence>
+        {showEffectsMenu && (
+          <div className="absolute inset-0 z-[160] flex items-end justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowEffectsMenu(false)}
+              className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              className="relative w-full max-w-sm glass rounded-t-3xl p-6 space-y-8"
+            >
+              <div className="flex items-center justify-between">
+                <h3 className="font-display font-bold text-lg flex items-center gap-2">
+                  <Zap size={20} className="text-vortex-accent" />
+                  Efeitos & Qualidade
+                </h3>
+                <button onClick={() => setShowEffectsMenu(false)} className="p-2 hover:bg-white/10 rounded-full">
+                  <X size={20} />
+                </button>
+              </div>
+
+              {/* Quality Selection */}
+              <div className="space-y-3">
+                <p className="text-[10px] font-bold text-white/40 uppercase tracking-widest">Qualidade do Vídeo</p>
+                <div className="flex gap-2">
+                  {(['low', 'medium', 'high'] as const).map((q) => (
+                    <button
+                      key={q}
+                      onClick={() => setVideoQuality(q)}
+                      className={cn(
+                        "flex-1 py-3 rounded-xl text-xs font-bold transition-all border",
+                        videoQuality === q 
+                          ? "bg-vortex-accent border-vortex-accent text-white" 
+                          : "bg-white/5 border-white/10 text-white/60 hover:bg-white/10"
+                      )}
+                    >
+                      {q === 'low' ? '360p' : q === 'medium' ? '720p' : '1080p'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Filter Selection */}
+              <div className="space-y-3">
+                <p className="text-[10px] font-bold text-white/40 uppercase tracking-widest">Filtros de Câmera</p>
+                <div className="grid grid-cols-4 gap-3">
+                  {[
+                    { id: 'none', name: 'Normal' },
+                    { id: 'beauty', name: 'Beauty' },
+                    { id: 'warm', name: 'Quente' },
+                    { id: 'cool', name: 'Frio' },
+                    { id: 'sepia', name: 'Sépia' },
+                    { id: 'grayscale', name: 'P&B' },
+                    { id: 'vintage', name: 'Vintage' },
+                    { id: 'neon', name: 'Neon' },
+                  ].map((f) => (
+                    <button
+                      key={f.id}
+                      onClick={() => setVideoFilter(f.id)}
+                      className="flex flex-col items-center gap-2 group"
+                    >
+                      <div className={cn(
+                        "w-12 h-12 rounded-xl border-2 transition-all overflow-hidden",
+                        videoFilter === f.id ? "border-vortex-accent scale-110" : "border-white/10 group-hover:border-white/30"
+                      )}>
+                        <div className="w-full h-full bg-gradient-to-br from-vortex-surface to-black flex items-center justify-center text-[10px] font-bold">
+                          {f.name[0]}
+                        </div>
+                      </div>
+                      <span className={cn(
+                        "text-[8px] font-bold transition-colors",
+                        videoFilter === f.id ? "text-vortex-accent" : "text-white/40"
+                      )}>
+                        {f.name}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <button 
+                onClick={() => setShowEffectsMenu(false)}
+                className="w-full py-4 bg-vortex-accent rounded-2xl font-bold text-sm shadow-lg shadow-vortex-accent/20"
+              >
+                Aplicar Efeitos
               </button>
             </motion.div>
           </div>

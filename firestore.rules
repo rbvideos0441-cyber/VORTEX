@@ -1,0 +1,117 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: userId (UID)
+    // Fields:
+    //   - uid: string (required)
+    //   - displayName: string
+    //   - photoURL: string (url)
+    //   - username: string (required)
+    //   - bio: string
+    //   - followersCount: number
+    //   - followingCount: number
+    //   - isPremium: bool (required)
+    //   - badges: list<string>
+    //   - coins: number
+    //
+    // Collection: videos
+    // Document ID: videoId
+    // Fields:
+    //   - creatorId: string (required)
+    //   - creatorName: string
+    //   - creatorPhoto: string
+    //   - videoUrl: string (required)
+    //   - thumbnailUrl: string
+    //   - description: string
+    //   - musicName: string
+    //   - likesCount: number
+    //   - commentsCount: number
+    //   - sharesCount: number
+    //   - createdAt: timestamp
+    //   - tags: list<string>
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         (request.auth.token.email == "rbvideos0441@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'username', 'isPremium', 'onboardingCompleted']) &&
+             data.uid is string && data.uid.size() > 0 &&
+             data.username is string && data.username.size() >= 3 && data.username.size() <= 20 &&
+             data.isPremium is bool &&
+             data.onboardingCompleted is bool &&
+             (!('bio' in data) || (data.bio is string && data.bio.size() <= 150)) &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 50)) &&
+             (!('website' in data) || (data.website is string && data.website.size() <= 100)) &&
+             (!('location' in data) || (data.location is string && data.location.size() <= 100)) &&
+             (!('pronouns' in data) || (data.pronouns is string && data.pronouns.size() <= 20)) &&
+             (!('followersCount' in data) || data.followersCount is number) &&
+             (!('coins' in data) || data.coins is number);
+    }
+
+    function isValidVideo(data) {
+      return data.keys().hasAll(['creatorId', 'videoUrl']) &&
+             data.creatorId is string && data.creatorId == request.auth.uid &&
+             data.videoUrl is string && data.videoUrl.matches("^https?://.*") &&
+             (!('description' in data) || (data.description is string && data.description.size() <= 500)) &&
+             (!('likesCount' in data) || data.likesCount is number);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) &&
+                      request.resource.data.uid == resource.data.uid &&
+                      (!('role' in request.resource.data) || request.resource.data.role == resource.data.role || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    match /videos/{videoId} {
+      allow read: if true; // Public feed
+      allow create: if isAuthenticated() && isValidVideo(request.resource.data);
+      allow update: if isAuthenticated() && (
+        (resource.data.creatorId == request.auth.uid && isValidVideo(request.resource.data)) ||
+        // Allow anyone to update likesCount (simplified for demo, ideally use a subcollection)
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likesCount']))
+      );
+      allow delete: if isAuthenticated() && (resource.data.creatorId == request.auth.uid || isAdmin());
+    }
+
+    match /lives/{liveId} {
+      allow read: if true;
+      allow create: if isAuthenticated();
+      allow update: if isAuthenticated() && (resource.data.creatorId == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && (resource.data.creatorId == request.auth.uid || isAdmin());
+
+      match /messages/{messageId} {
+        allow read: if true;
+        allow create: if isAuthenticated();
+      }
+    }
+  }
+}

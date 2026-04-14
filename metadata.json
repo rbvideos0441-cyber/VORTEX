@@ -1,0 +1,6 @@
+{
+  "name": "VORTEX",
+  "description": "Seu mundo em movimento. Uma plataforma de vídeos curtos e transmissões ao vivo de alta performance com estética Dark Neon Minimal.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["video-streaming", "real-time-chat", "monetization"]
+}

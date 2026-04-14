@@ -1,0 +1,90 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Public and private user profile data",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string", "format": "url" },
+        "username": { "type": "string" },
+        "bio": { "type": "string" },
+        "followersCount": { "type": "number" },
+        "followingCount": { "type": "number" },
+        "isPremium": { "type": "boolean" },
+        "badges": { "type": "array", "items": { "type": "string" } },
+        "coins": { "type": "number" }
+      },
+      "required": ["uid", "username", "isPremium"]
+    },
+    "Video": {
+      "title": "Video",
+      "description": "Short video content metadata",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "creatorId": { "type": "string" },
+        "creatorName": { "type": "string" },
+        "creatorPhoto": { "type": "string", "format": "url" },
+        "videoUrl": { "type": "string", "format": "url" },
+        "thumbnailUrl": { "type": "string", "format": "url" },
+        "description": { "type": "string" },
+        "musicName": { "type": "string" },
+        "likesCount": { "type": "number" },
+        "commentsCount": { "type": "number" },
+        "sharesCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "tags": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["creatorId", "videoUrl"]
+    },
+    "LiveStream": {
+      "title": "LiveStream",
+      "description": "Active live stream metadata",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "creatorId": { "type": "string" },
+        "creatorName": { "type": "string" },
+        "creatorPhoto": { "type": "string", "format": "url" },
+        "title": { "type": "string" },
+        "viewerCount": { "type": "number" },
+        "coinCount": { "type": "number" },
+        "isLive": { "type": "boolean" },
+        "type": { "type": "string", "enum": ["video", "audio"] },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "activeSlotCount": { "type": "number" },
+        "participants": { 
+          "type": "array", 
+          "items": { 
+            "type": "object",
+            "properties": {
+              "uid": { "type": "string" },
+              "username": { "type": "string" },
+              "photoURL": { "type": "string" },
+              "isMuted": { "type": "boolean" },
+              "isVideoOff": { "type": "boolean" },
+              "isSpeaking": { "type": "boolean" }
+            }
+          }
+        }
+      },
+      "required": ["creatorId", "isLive", "activeSlotCount"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile documents"
+    },
+    "/videos/{videoId}": {
+      "schema": "Video",
+      "description": "Short video documents"
+    },
+    "/lives/{liveId}": {
+      "schema": "LiveStream",
+      "description": "Live stream documents"
+    }
+  }
+}

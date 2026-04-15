@@ -18,6 +18,10 @@ export const CreateVideoFlow: React.FC<CreateVideoFlowProps> = ({ onClose, onPub
   const [activeEditor, setActiveEditor] = useState<'text' | 'stickers' | 'voice' | 'trim' | 'sound' | null>(null);
   const [volume, setVolume] = useState(100);
   const [overlayText, setOverlayText] = useState('');
+  const [activeFilter, setActiveFilter] = useState('none');
+  const [showFilters, setShowFilters] = useState(false);
+  const [activeSpeed, setActiveSpeed] = useState(1);
+  const [isBeautyOn, setIsBeautyOn] = useState(false);
   const galleryInputRef = useRef<HTMLInputElement>(null);
 
   const handleGalleryUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -63,23 +67,63 @@ export const CreateVideoFlow: React.FC<CreateVideoFlowProps> = ({ onClose, onPub
 
             {/* Right Sidebar Controls */}
             <div className="absolute right-4 top-1/2 -translate-y-1/2 flex flex-col gap-6 z-20">
-              <button className="flex flex-col items-center gap-1 text-white">
-                <div className="p-2 glass rounded-full"><Zap size={20} /></div>
+              <button 
+                onClick={() => setShowFilters(!showFilters)}
+                className={cn("flex flex-col items-center gap-1 text-white transition-all", showFilters && "text-vortex-accent")}
+              >
+                <div className={cn("p-2 glass rounded-full", showFilters && "bg-vortex-accent/20 border-vortex-accent")}><Zap size={20} /></div>
                 <span className="text-[10px] font-bold uppercase">Filtros</span>
               </button>
               <button className="flex flex-col items-center gap-1 text-white">
                 <div className="p-2 glass rounded-full"><Timer size={20} /></div>
                 <span className="text-[10px] font-bold uppercase">Timer</span>
               </button>
-              <button className="flex flex-col items-center gap-1 text-white">
-                <div className="p-2 glass rounded-full"><Sliders size={20} /></div>
-                <span className="text-[10px] font-bold uppercase">Veloc.</span>
+              <button 
+                onClick={() => setActiveSpeed(prev => prev === 1 ? 2 : prev === 2 ? 0.5 : 1)}
+                className="flex flex-col items-center gap-1 text-white"
+              >
+                <div className={cn("p-2 glass rounded-full", activeSpeed !== 1 && "bg-vortex-highlight/20 border-vortex-highlight")}>
+                  <Sliders size={20} className={activeSpeed !== 1 ? "text-vortex-highlight" : ""} />
+                </div>
+                <span className="text-[10px] font-bold uppercase">
+                  {activeSpeed === 1 ? 'Veloc.' : `${activeSpeed}x`}
+                </span>
               </button>
-              <button className="flex flex-col items-center gap-1 text-white">
-                <div className="p-2 glass rounded-full"><Wand2 size={20} /></div>
+              <button 
+                onClick={() => setIsBeautyOn(!isBeautyOn)}
+                className="flex flex-col items-center gap-1 text-white"
+              >
+                <div className={cn("p-2 glass rounded-full", isBeautyOn && "bg-pink-500/20 border-pink-500")}>
+                  <Wand2 size={20} className={isBeautyOn ? "text-pink-500" : ""} />
+                </div>
                 <span className="text-[10px] font-bold uppercase">Beleza</span>
               </button>
             </div>
+
+            {/* Filter Selection Overlay */}
+            <AnimatePresence>
+              {showFilters && (
+                <motion.div 
+                  initial={{ opacity: 0, x: 20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: 20 }}
+                  className="absolute right-20 top-1/2 -translate-y-1/2 glass p-4 rounded-2xl z-30 grid grid-cols-2 gap-2"
+                >
+                  {['none', 'beauty', 'warm', 'cool', 'vintage', 'neon'].map(f => (
+                    <button 
+                      key={f}
+                      onClick={() => { setActiveFilter(f); setShowFilters(false); }}
+                      className={cn(
+                        "px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-widest transition-all",
+                        activeFilter === f ? "bg-vortex-accent text-white" : "hover:bg-white/10 text-white/60"
+                      )}
+                    >
+                      {f}
+                    </button>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
 
             {/* Bottom Controls */}
             <div className="absolute bottom-12 left-0 right-0 px-8 flex items-center justify-between z-20">
@@ -166,7 +210,6 @@ export const CreateVideoFlow: React.FC<CreateVideoFlowProps> = ({ onClose, onPub
                      className="w-full h-full object-cover" 
                      autoPlay 
                      loop 
-                     muted 
                    />
                  ) : (
                    <Scissors size={48} className="text-white/10" />

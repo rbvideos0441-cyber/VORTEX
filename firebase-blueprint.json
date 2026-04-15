@@ -51,6 +51,7 @@
         "title": { "type": "string" },
         "viewerCount": { "type": "number" },
         "coinCount": { "type": "number" },
+        "likesCount": { "type": "number" },
         "isLive": { "type": "boolean" },
         "type": { "type": "string", "enum": ["video", "audio"] },
         "startedAt": { "type": "string", "format": "date-time" },

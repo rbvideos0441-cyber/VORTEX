@@ -421,6 +421,14 @@ export const LiveStreamScreen: React.FC<LiveStreamScreenProps> = ({ live: initia
     setShowShareMenu(false);
   };
 
+  const sendLike = async () => {
+    addReaction('❤️');
+    const liveRef = doc(db, 'lives', initialLive.id);
+    await updateDoc(liveRef, {
+      likesCount: (live.likesCount || 0) + 1
+    });
+  };
+
   const shareOnSocial = async (platform: string) => {
     const shareUrl = `https://vortex.app/live/${live.id}`;
     const shareText = `Assista à live de ${live.creatorName} no VORTEX! ◈`;
@@ -476,14 +484,14 @@ export const LiveStreamScreen: React.FC<LiveStreamScreenProps> = ({ live: initia
               <span className="text-[10px] font-bold leading-tight truncate max-w-[80px]">{live.creatorName}</span>
               <div className="flex items-center gap-1">
                 <Heart size={8} fill="#EC4899" className="text-vortex-secondary" />
-                <span className="text-[8px] font-bold text-white/60">231</span>
+                <span className="text-[8px] font-bold text-white/60">{live.likesCount || 0}</span>
               </div>
             </div>
           </div>
 
           <div className="flex items-center gap-2 bg-black/40 backdrop-blur-md px-3 py-1 rounded-full border border-white/10">
-            <Heart size={14} fill="#F87171" className="text-red-400" />
-            <span className="text-[10px] font-bold">486</span>
+            <Users size={14} className="text-vortex-accent" />
+            <span className="text-[10px] font-bold">{live.viewerCount || 0}</span>
           </div>
         </div>
 
@@ -662,8 +670,8 @@ export const LiveStreamScreen: React.FC<LiveStreamScreenProps> = ({ live: initia
       </div>
 
       {/* Footer Interaction Bar */}
-      <div className="relative z-20 px-4 pb-6 flex items-center gap-3 shrink-0">
-        <div className="flex-1 glass rounded-full px-4 py-2 flex items-center gap-3">
+      <div className="relative z-20 px-4 pb-6 flex flex-col items-center gap-3 shrink-0">
+        <div className="w-full glass rounded-full px-4 py-2 flex items-center gap-3">
           <input 
             type="text" 
             value={inputText}
@@ -677,7 +685,13 @@ export const LiveStreamScreen: React.FC<LiveStreamScreenProps> = ({ live: initia
           </button>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center justify-center gap-3">
+          <button 
+            onClick={sendLike}
+            className="p-2.5 bg-vortex-secondary rounded-full text-white shadow-lg shadow-vortex-secondary/20 active:scale-125 transition-transform"
+          >
+            <Heart size={18} fill="currentColor" />
+          </button>
           <button 
             onClick={sendGift}
             className="p-2.5 bg-vortex-gold rounded-full text-white shadow-lg"
@@ -1070,7 +1084,7 @@ export const LiveStreamScreen: React.FC<LiveStreamScreenProps> = ({ live: initia
       </AnimatePresence>
 
       {/* Emoji Reactions Animation */}
-      <div className="absolute right-4 bottom-32 z-[110] pointer-events-none">
+      <div className="absolute left-1/2 -translate-x-1/2 bottom-40 z-[110] pointer-events-none">
         <AnimatePresence>
           {reactions.map((r) => (
             <motion.div

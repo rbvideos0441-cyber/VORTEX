@@ -10,6 +10,7 @@ import { EditProfileScreen } from './components/EditProfileScreen';
 import { CreateVideoFlow } from './components/CreateVideoFlow';
 import { LiveStreamScreen } from './components/LiveStreamScreen';
 import { CoinShop } from './components/CoinShop';
+import { AdminPanel } from './components/AdminPanel';
 import { Video, UserProfile, LiveStream } from './types';
 
 const MOCK_LIVE: LiveStream = {
@@ -111,7 +112,7 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'discover' | 'inbox' | 'profile' | 'admin'>('home');
   const [activeFeed, setActiveFeed] = useState<'following' | 'foryou' | 'trending' | 'nearby'>('foryou');
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [isCreatingVideo, setIsCreatingVideo] = useState(false);
@@ -121,15 +122,23 @@ export default function App() {
   const [videos, setVideos] = useState<Video[]>(MOCK_VIDEOS);
 
   useEffect(() => {
+    console.log("Iniciando onAuthStateChanged listener...");
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      console.log("Mudança de estado de autenticação detectada:", currentUser?.email || "Nenhum usuário");
       setUser(currentUser);
-      if (currentUser) {
-        const userProfile = await getUserProfile(currentUser.uid);
-        setProfile(userProfile);
-      } else {
-        setProfile(null);
+      try {
+        if (currentUser) {
+          const userProfile = await getUserProfile(currentUser.uid);
+          console.log("Perfil do usuário recuperado:", userProfile?.username || "Nenhum perfil");
+          setProfile(userProfile);
+        } else {
+          setProfile(null);
+        }
+      } catch (error) {
+        console.error("Erro ao recuperar perfil do usuário:", error);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
     });
     return () => unsubscribe();
   }, []);
@@ -168,7 +177,13 @@ export default function App() {
     if (tab === 'create') {
       setIsCreatingVideo(true);
     } else {
-      setActiveTab(tab);
+      setActiveTab(tab as any);
+    }
+  };
+
+  const handleAdminAccess = () => {
+    if (profile?.role === 'admin' || user?.email === 'rbvideos0441@gmail.com') {
+      setActiveTab('admin');
     }
   };
 
@@ -204,6 +219,7 @@ export default function App() {
             <VideoFeed 
               videos={videos} 
               onLiveClick={() => setShowLiveSelection(true)}
+              onProfileClick={() => setActiveTab('profile')}
             />
           </>
         )}
@@ -218,15 +234,19 @@ export default function App() {
 
         {/* Placeholder for other tabs */}
         {activeTab === 'discover' && (
-          <div className="h-full flex flex-col items-center justify-center p-8 text-center text-vortex-text-secondary gap-6">
+          <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center text-vortex-text-secondary gap-6">
             <p className="font-display text-xl italic opacity-50">Explorar em breve...</p>
           </div>
         )}
 
         {activeTab === 'inbox' && (
-          <div className="h-full flex items-center justify-center p-8 text-center text-vortex-text-secondary">
+          <div className="absolute inset-0 flex items-center justify-center p-8 text-center text-vortex-text-secondary">
             <p className="font-display text-xl italic opacity-50">Mensagens em breve...</p>
           </div>
+        )}
+
+        {activeTab === 'admin' && (
+          <AdminPanel />
         )}
       </main>
 
@@ -343,7 +363,11 @@ export default function App() {
       </AnimatePresence>
 
       {/* Bottom Navigation */}
-      <BottomNav activeTab={activeTab} setActiveTab={handleTabChange} />
+      <BottomNav 
+        activeTab={activeTab} 
+        setActiveTab={handleTabChange} 
+        isAdmin={profile?.role === 'admin' || user?.email === 'rbvideos0441@gmail.com'}
+      />
     </div>
   );
 }

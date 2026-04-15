@@ -9,11 +9,13 @@ interface VideoCardProps {
   video: Video;
   isActive: boolean;
   onLiveClick?: () => void;
+  onProfileClick?: (uid: string) => void;
 }
 
-export const VideoCard: React.FC<VideoCardProps> = ({ video, isActive, onLiveClick }) => {
+export const VideoCard: React.FC<VideoCardProps> = ({ video, isActive, onLiveClick, onProfileClick }) => {
   const [isLiked, setIsLiked] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
+  const [isFollowing, setIsFollowing] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [showHeartAnim, setShowHeartAnim] = useState(false);
@@ -111,22 +113,14 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, isActive, onLiveCli
       )}
 
       {/* Overlays */}
-      <div className="absolute inset-0 pointer-events-none bg-linear-to-b from-black/20 via-transparent to-black/60" />
-
-      {/* Mute Toggle */}
-      <button
-        onClick={(e) => { e.stopPropagation(); setIsMuted(!isMuted); }}
-        className="absolute top-6 right-6 z-20 p-2 glass rounded-full text-white/80 hover:text-white transition-colors pointer-events-auto"
-      >
-        {isMuted ? <VolumeX size={20} /> : <Volume2 size={20} />}
-      </button>
+      <div className="absolute inset-0 pointer-events-none bg-linear-to-b from-black/40 via-transparent to-black/60" />
 
       {/* Right Side Actions */}
-      <div className="absolute right-4 bottom-24 flex flex-col items-center gap-5 z-10 pointer-events-auto">
+      <div className="absolute right-4 bottom-28 flex flex-col items-center gap-3.5 z-10 pointer-events-auto">
         {/* Profile */}
         <div className="relative mb-2">
           <div 
-            onClick={(e) => { e.stopPropagation(); onLiveClick?.(); }}
+            onClick={(e) => { e.stopPropagation(); onProfileClick?.(video.creatorId); }}
             className="w-12 h-12 rounded-full border-2 border-white overflow-hidden shadow-lg relative cursor-pointer"
           >
             <img src={video.creatorPhoto} alt={video.creatorName} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
@@ -135,7 +129,13 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, isActive, onLiveCli
               LIVE
             </div>
           </div>
-          <button className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-vortex-secondary rounded-full p-0.5 text-white shadow-lg z-10">
+          <button 
+            onClick={(e) => { e.stopPropagation(); setIsFollowing(!isFollowing); }}
+            className={cn(
+              "absolute -bottom-2 left-1/2 -translate-x-1/2 rounded-full p-0.5 text-white shadow-lg z-10 transition-all",
+              isFollowing ? "bg-vortex-accent scale-0" : "bg-vortex-secondary scale-100"
+            )}
+          >
             <Plus size={14} />
           </button>
         </div>
@@ -191,13 +191,26 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, isActive, onLiveCli
       </div>
 
       {/* Bottom Info */}
-      <div className="absolute bottom-8 left-4 right-20 z-10 pointer-events-none">
-        <h3 className="font-display text-lg font-bold mb-1 drop-shadow-lg">@{video.creatorName}</h3>
-        <p className="text-sm text-white/90 line-clamp-2 mb-3 drop-shadow-md">
+      <div className="absolute bottom-28 left-4 right-20 z-10 pointer-events-none">
+        <div className="flex items-center gap-3 mb-1 pointer-events-auto">
+          <h3 className="font-display text-base font-bold drop-shadow-lg">@{video.creatorName}</h3>
+          <button 
+            onClick={(e) => { e.stopPropagation(); setIsFollowing(!isFollowing); }}
+            className={cn(
+              "px-3 py-0.5 rounded-full text-[10px] font-bold border transition-all",
+              isFollowing 
+                ? "bg-white/10 border-white/20 text-white/60" 
+                : "bg-vortex-accent border-vortex-accent text-white shadow-[0_0_10px_rgba(124,58,237,0.3)]"
+            )}
+          >
+            {isFollowing ? 'Seguindo' : 'Seguir'}
+          </button>
+        </div>
+        <p className="text-xs text-white/90 line-clamp-2 mb-2 drop-shadow-md">
           {video.description}
         </p>
         <div className="flex items-center gap-2 text-xs font-bold text-vortex-highlight drop-shadow-md">
-          <Music2 size={14} className="animate-spin-slow" />
+          <Music2 size={14} />
           <div className="overflow-hidden whitespace-nowrap w-40">
             <motion.div
               animate={{ x: [0, -100] }}
@@ -208,17 +221,6 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, isActive, onLiveCli
             </motion.div>
           </div>
         </div>
-      </div>
-
-      {/* Music Disk */}
-      <div className="absolute bottom-8 right-4 z-10">
-        <motion.div
-          animate={{ rotate: 360 }}
-          transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
-          className="w-10 h-10 rounded-full bg-linear-to-tr from-vortex-bg to-vortex-surface border-4 border-white/20 flex items-center justify-center overflow-hidden shadow-xl"
-        >
-          <img src={video.creatorPhoto} alt="music" className="w-6 h-6 rounded-full object-cover" referrerPolicy="no-referrer" />
-        </motion.div>
       </div>
 
       {/* Comments Panel */}

@@ -1,13 +1,14 @@
 import React from 'react';
-import { Home, Search, Plus, MessageSquare, User } from 'lucide-react';
+import { Home, Search, Plus, MessageSquare, User, Shield } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 interface BottomNavProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
+  isAdmin?: boolean;
 }
 
-export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab }) => {
+export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab, isAdmin }) => {
   const tabs = [
     { id: 'home', icon: Home, label: 'Início' },
     { id: 'discover', icon: Search, label: 'Descobrir' },
@@ -15,6 +16,10 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab })
     { id: 'inbox', icon: MessageSquare, label: 'Entrada' },
     { id: 'profile', icon: User, label: 'Perfil' },
   ];
+
+  if (isAdmin) {
+    tabs.splice(4, 0, { id: 'admin', icon: Shield, label: 'Admin' });
+  }
 
   return (
     <div className="fixed bottom-0 left-0 right-0 z-50 px-4 pb-6 pt-2">

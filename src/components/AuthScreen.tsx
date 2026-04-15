@@ -1,9 +1,33 @@
 import React from 'react';
 import { motion } from 'motion/react';
 import { LogIn, Mail, Apple, Chrome } from 'lucide-react';
+import { cn } from '../lib/utils';
 import { signInWithGoogle } from '../firebase';
 
 export const AuthScreen: React.FC = () => {
+  const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
+  const [isLoggingIn, setIsLoggingIn] = React.useState(false);
+
+  const handleGoogleLogin = async () => {
+    console.log("Iniciando login com Google...");
+    setErrorMsg(null);
+    setIsLoggingIn(true);
+    try {
+      const result = await signInWithGoogle();
+      console.log("Login com Google bem-sucedido:", result.user.email);
+    } catch (error: any) {
+      console.error("Erro ao fazer login com Google:", error);
+      if (error.code === 'auth/popup-blocked') {
+        setErrorMsg("O popup foi bloqueado pelo seu navegador. Por favor, permita popups para este site.");
+      } else if (error.code === 'auth/unauthorized-domain') {
+        setErrorMsg("Este domínio não está autorizado no Firebase Console. Por favor, adicione este domínio às configurações de autenticação.");
+      } else {
+        setErrorMsg("Erro ao entrar com Google. Por favor, tente novamente.");
+      }
+      setIsLoggingIn(false);
+    }
+  };
+
   return (
     <div className="relative h-screen w-full overflow-hidden flex items-center justify-center">
       {/* Background Video */}
@@ -34,12 +58,25 @@ export const AuthScreen: React.FC = () => {
           </p>
 
           <div className="space-y-4">
+            {errorMsg && (
+              <div className="bg-red-500/20 border border-red-500/50 text-red-200 text-xs p-3 rounded-xl mb-4">
+                {errorMsg}
+              </div>
+            )}
             <button
-              onClick={signInWithGoogle}
-              className="w-full py-4 glass rounded-full flex items-center justify-center gap-3 font-bold hover:bg-white/10 transition-all group"
+              onClick={handleGoogleLogin}
+              disabled={isLoggingIn}
+              className={cn(
+                "w-full py-4 glass rounded-full flex items-center justify-center gap-3 font-bold hover:bg-white/10 transition-all group",
+                isLoggingIn && "opacity-50 cursor-wait"
+              )}
             >
-              <Chrome size={20} className="group-hover:text-vortex-highlight transition-colors" />
-              Continuar com Google
+              {isLoggingIn ? (
+                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              ) : (
+                <Chrome size={20} className="group-hover:text-vortex-highlight transition-colors" />
+              )}
+              {isLoggingIn ? 'Entrando...' : 'Continuar com Google'}
             </button>
 
             <button

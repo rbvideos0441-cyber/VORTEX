@@ -16,6 +16,7 @@ export interface UserProfile {
   coins: number;
   interests: string[];
   onboardingCompleted: boolean;
+  role?: 'admin' | 'user';
   createdAt: any;
 }
 
@@ -61,6 +62,7 @@ export interface LiveStream {
   title: string;
   viewerCount: number;
   coinCount: number;
+  likesCount?: number;
   isLive: boolean;
   type: 'video' | 'audio';
   startedAt: any;

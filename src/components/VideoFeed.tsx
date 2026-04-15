@@ -5,9 +5,10 @@ import { Video } from '../types';
 interface VideoFeedProps {
   videos: Video[];
   onLiveClick?: () => void;
+  onProfileClick?: (uid: string) => void;
 }
 
-export const VideoFeed: React.FC<VideoFeedProps> = ({ videos, onLiveClick }) => {
+export const VideoFeed: React.FC<VideoFeedProps> = ({ videos, onLiveClick, onProfileClick }) => {
   const [activeIndex, setActiveIndex] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -24,7 +25,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ videos, onLiveClick }) => 
     <div
       ref={containerRef}
       onScroll={handleScroll}
-      className="h-full w-full overflow-y-scroll snap-y snap-mandatory no-scrollbar bg-black"
+      className="absolute inset-0 w-full overflow-y-scroll snap-y snap-mandatory no-scrollbar bg-black"
     >
       {videos.map((video, index) => (
         <VideoCard
@@ -32,6 +33,7 @@ export const VideoFeed: React.FC<VideoFeedProps> = ({ videos, onLiveClick }) => 
           video={video}
           isActive={index === activeIndex}
           onLiveClick={onLiveClick}
+          onProfileClick={onProfileClick}
         />
       ))}
     </div>

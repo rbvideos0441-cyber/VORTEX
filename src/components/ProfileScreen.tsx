@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
-import { Settings, Edit2, Grid, Heart, Repeat, Radio, Link as LinkIcon, MapPin, Star, Coins } from 'lucide-react';
+import { Settings, Edit2, Grid, Heart, Repeat, Radio, Link as LinkIcon, MapPin, Star, Coins, LogOut } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { UserProfile } from '../types';
 import { logOut } from '../firebase';
@@ -13,6 +13,7 @@ interface ProfileScreenProps {
 
 export const ProfileScreen: React.FC<ProfileScreenProps> = ({ profile, onEdit, onOpenShop }) => {
   const [activeTab, setActiveTab] = useState('videos');
+  const [showSettings, setShowSettings] = useState(false);
 
   const tabs = [
     { id: 'videos', icon: Grid, label: 'Vídeos' },
@@ -21,8 +22,22 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ profile, onEdit, o
     { id: 'lives', icon: Radio, label: 'Lives' },
   ];
 
+  const handleLogout = async () => {
+    console.log("Iniciando logout...");
+    try {
+      await logOut();
+      console.log("Logout concluído com sucesso.");
+      // Pequeno delay para garantir que o SDK do Firebase processe o logout antes do reload
+      setTimeout(() => {
+        window.location.reload();
+      }, 500);
+    } catch (error) {
+      console.error("Erro ao sair:", error);
+    }
+  };
+
   return (
-    <div className="h-full bg-vortex-bg overflow-y-auto no-scrollbar pb-32">
+    <div className="absolute inset-0 bg-vortex-bg overflow-y-auto no-scrollbar pb-32">
       {/* Banner */}
       <div className="relative h-48 w-full bg-linear-to-br from-vortex-accent/20 to-vortex-secondary/20 overflow-hidden">
         {profile.bannerURL && (
@@ -30,12 +45,15 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ profile, onEdit, o
         )}
         <div className="absolute inset-0 bg-linear-to-t from-vortex-bg via-transparent to-transparent" />
         
-        <button 
-          onClick={logOut}
-          className="absolute top-6 right-6 p-2 glass rounded-full text-white/80 hover:text-white z-10"
-        >
-          <Settings size={20} />
-        </button>
+        <div className="absolute top-6 right-6 z-20">
+          <button 
+            onClick={() => setShowSettings(!showSettings)}
+            className="p-2.5 glass rounded-full text-white/80 hover:text-white transition-colors"
+            title="Configurações"
+          >
+            <Settings size={20} />
+          </button>
+        </div>
       </div>
 
       {/* Profile Info */}
@@ -76,7 +94,7 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ profile, onEdit, o
           {profile.bio || "Nenhuma bio definida ainda. ✨"}
         </p>
 
-        <div className="flex flex-wrap gap-4 mb-8">
+        <div className="flex flex-wrap gap-4 mb-6">
           {profile.website && (
             <a href={profile.website} target="_blank" rel="noreferrer" className="flex items-center gap-1.5 text-xs text-vortex-highlight hover:underline">
               <LinkIcon size={14} />
@@ -91,60 +109,18 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ profile, onEdit, o
           )}
         </div>
 
-        {/* Stats & Economy */}
-        <div className="grid grid-cols-4 gap-4 p-4 glass rounded-3xl mb-8">
-          <div className="text-center">
-            <p className="font-mono font-bold text-lg">{profile.followersCount}</p>
-            <p className="text-[10px] uppercase tracking-widest text-vortex-text-secondary">Seguidores</p>
-          </div>
-          <div className="text-center">
-            <p className="font-mono font-bold text-lg">{profile.followingCount}</p>
-            <p className="text-[10px] uppercase tracking-widest text-vortex-text-secondary">Seguindo</p>
-          </div>
+        <div className="flex flex-col gap-3 mb-8">
           <button 
-            onClick={onOpenShop}
-            className="text-center hover:scale-105 transition-transform"
+            onClick={handleLogout}
+            className="w-full py-3 bg-red-500/10 border border-red-500/20 rounded-2xl text-red-400 text-sm font-bold flex items-center justify-center gap-2 hover:bg-red-500/20 transition-all"
           >
-            <p className="font-mono font-bold text-lg flex items-center justify-center gap-1 text-vortex-highlight">
-              <Coins size={14} />
-              {profile.coins}
-            </p>
-            <p className="text-[10px] uppercase tracking-widest text-vortex-text-secondary">Moedas</p>
+            <LogOut size={18} />
+            Sair da Conta
           </button>
-          <div className="text-center">
-            <p className="font-mono font-bold text-lg">★</p>
-            <p className="text-[10px] uppercase tracking-widest text-vortex-text-secondary">Badges</p>
-          </div>
-        </div>
-
-        {/* Tabs */}
-        <div className="flex items-center justify-between border-b border-white/5 mb-4">
-          {tabs.map(tab => {
-            const Icon = tab.icon;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={cn(
-                  "flex-1 flex flex-col items-center gap-2 py-3 transition-all relative",
-                  activeTab === tab.id ? "text-white" : "text-vortex-text-secondary"
-                )}
-              >
-                <Icon size={20} />
-                <span className="text-[10px] uppercase tracking-widest font-bold">{tab.label}</span>
-                {activeTab === tab.id && (
-                  <motion.div 
-                    layoutId="activeTab"
-                    className="absolute bottom-0 left-0 right-0 h-0.5 bg-vortex-accent" 
-                  />
-                )}
-              </button>
-            );
-          })}
         </div>
 
         {/* Grid */}
-        <div className="grid grid-cols-3 gap-1">
+        <div className="grid grid-cols-3 gap-1 mt-4">
           {[...Array(12)].map((_, i) => (
             <div key={i} className="aspect-[3/4] bg-vortex-surface rounded-sm overflow-hidden relative group cursor-pointer">
               <img 

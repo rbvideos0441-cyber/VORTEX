@@ -67,7 +67,8 @@ service cloud.firestore {
              (!('location' in data) || (data.location is string && data.location.size() <= 100)) &&
              (!('pronouns' in data) || (data.pronouns is string && data.pronouns.size() <= 20)) &&
              (!('followersCount' in data) || data.followersCount is number) &&
-             (!('coins' in data) || data.coins is number);
+             (!('coins' in data) || data.coins is number) &&
+             (!('role' in data) || data.role in ['admin', 'user']);
     }
 
     function isValidVideo(data) {
@@ -110,7 +111,10 @@ service cloud.firestore {
         isAdmin() ||
         // Allow participants to update their own state (mute/video)
         (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['participants']) &&
-         request.resource.data.participants.size() == resource.data.participants.size())
+         request.resource.data.participants.size() == resource.data.participants.size()) ||
+        // Allow anyone to update likesCount or coinCount
+        (request.resource.data.diff(resource.data).affectedKeys().hasAny(['likesCount', 'coinCount']) &&
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likesCount', 'coinCount', 'participants']))
       );
       allow delete: if isAuthenticated() && (resource.data.creatorId == request.auth.uid || isAdmin());
 

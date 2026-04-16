@@ -18,11 +18,13 @@ export const AuthScreen: React.FC = () => {
     } catch (error: any) {
       console.error("Erro ao fazer login com Google:", error);
       if (error.code === 'auth/popup-blocked') {
-        setErrorMsg("O popup foi bloqueado pelo seu navegador. Por favor, permita popups para este site.");
+        setErrorMsg("O popup foi bloqueado. Por favor, permita popups ou tente abrir o link diretamente no navegador (fora do Instagram/TikTok).");
       } else if (error.code === 'auth/unauthorized-domain') {
-        setErrorMsg("Este domínio não está autorizado no Firebase Console. Por favor, adicione este domínio às configurações de autenticação.");
+        setErrorMsg(`Domínio não autorizado: ${window.location.hostname}. Adicione este domínio no Console do Firebase > Auth > Settings.`);
+      } else if (error.code === 'auth/popup-closed-by-user') {
+        setErrorMsg("O login foi cancelado. Tente novamente.");
       } else {
-        setErrorMsg("Erro ao entrar com Google. Por favor, tente novamente.");
+        setErrorMsg(`Erro (${error.code || 'unknown'}): Tente recarregar a página ou usar o navegador Chrome/Safari.`);
       }
       setIsLoggingIn(false);
     }

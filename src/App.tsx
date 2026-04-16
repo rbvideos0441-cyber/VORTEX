@@ -124,19 +124,22 @@ export default function App() {
   useEffect(() => {
     console.log("Iniciando onAuthStateChanged listener...");
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      console.log("Mudança de estado de autenticação detectada:", currentUser?.email || "Nenhum usuário");
+      console.log("Auth State Change:", currentUser ? `User: ${currentUser.email}` : "No User");
       setUser(currentUser);
-      try {
-        if (currentUser) {
+      
+      if (currentUser) {
+        setLoading(true); // Ensure loading is true while fetching profile
+        try {
           const userProfile = await getUserProfile(currentUser.uid);
-          console.log("Perfil do usuário recuperado:", userProfile?.username || "Nenhum perfil");
+          console.log("Profile Fetch Result:", userProfile ? `Found: ${userProfile.username}` : "Not Found");
           setProfile(userProfile);
-        } else {
-          setProfile(null);
+        } catch (error) {
+          console.error("Error fetching user profile:", error);
+        } finally {
+          setLoading(false);
         }
-      } catch (error) {
-        console.error("Erro ao recuperar perfil do usuário:", error);
-      } finally {
+      } else {
+        setProfile(null);
         setLoading(false);
       }
     });

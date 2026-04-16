@@ -61,6 +61,7 @@ export const LiveStreamScreen: React.FC<LiveStreamScreenProps> = ({ live: initia
   const [selectedUserUid, setSelectedUserUid] = useState<string | null>(null);
   const [showShareMenu, setShowShareMenu] = useState(false);
   const [showCopyToast, setShowCopyToast] = useState(false);
+  const [duration, setDuration] = useState('00:00');
   const [friends, setFriends] = useState<any[]>([]);
   const [sharedWith, setSharedWith] = useState<string[]>([]);
   const [hasPaid, setHasPaid] = useState<boolean | null>(null);
@@ -85,6 +86,38 @@ export const LiveStreamScreen: React.FC<LiveStreamScreenProps> = ({ live: initia
       { urls: 'stun:stun1.l.google.com:19302' },
     ],
   };
+
+  // Live duration timer
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (live.startedAt) {
+        try {
+          const start = live.startedAt.toDate ? live.startedAt.toDate().getTime() : new Date(live.startedAt).getTime();
+          const now = Date.now();
+          const diff = Math.floor((now - start) / 1000);
+          
+          if (diff < 0) {
+            setDuration('00:00');
+            return;
+          }
+
+          const h = Math.floor(diff / 3600);
+          const m = Math.floor((diff % 3600) / 60);
+          const s = diff % 60;
+
+          const formatted = h > 0 
+            ? `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+            : `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+          
+          setDuration(formatted);
+        } catch (e) {
+          setDuration('00:00');
+        }
+      }
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [live.startedAt]);
 
   // Fetch friends (simulated by fetching other users)
   useEffect(() => {
@@ -716,7 +749,10 @@ export const LiveStreamScreen: React.FC<LiveStreamScreenProps> = ({ live: initia
               <img src={live.creatorPhoto} alt="host" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
             </div>
             <div className="flex flex-col">
-              <span className="text-[10px] font-bold leading-tight truncate max-w-[80px]">{live.creatorName}</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-[10px] font-bold leading-tight truncate max-w-[80px]">{live.creatorName}</span>
+                <span className="text-[8px] font-mono bg-vortex-accent/20 text-vortex-accent px-1 rounded border border-vortex-accent/30">{duration}</span>
+              </div>
               <div className="flex items-center gap-1">
                 <Heart size={8} fill="#EC4899" className="text-vortex-secondary" />
                 <span className="text-[8px] font-bold text-white/60">{live.likesCount || 0}</span>

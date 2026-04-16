@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Heart, MessageCircle, Share2, Music2, Plus, Volume2, VolumeX, Bookmark, Coins, MoreVertical } from 'lucide-react';
+import { Heart, MessageCircle, Share2, Music2, Plus, Volume2, VolumeX, Bookmark, Coins, MoreVertical, UserPlus, UserCheck } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { Video } from '../types';
 import { CommentsPanel } from './CommentsPanel';
@@ -37,8 +37,9 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, isActive, onLiveCli
 
   const handleTimeUpdate = () => {
     if (videoRef.current) {
-      const p = (videoRef.current.currentTime / videoRef.current.duration) * 100;
-      setProgress(p);
+      const duration = videoRef.current.duration;
+      const p = duration > 0 ? (videoRef.current.currentTime / duration) * 100 : 0;
+      setProgress(isNaN(p) ? 0 : p);
     }
   };
 
@@ -116,9 +117,9 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, isActive, onLiveCli
       <div className="absolute inset-0 pointer-events-none bg-linear-to-b from-black/40 via-transparent to-black/60" />
 
       {/* Right Side Actions */}
-      <div className="absolute right-4 bottom-28 flex flex-col items-center gap-3.5 z-10 pointer-events-auto">
+      <div className="absolute right-4 bottom-32 flex flex-col items-center gap-5 z-10 pointer-events-auto">
         {/* Profile */}
-        <div className="relative mb-2">
+        <div className="relative mb-2 flex flex-col items-center gap-2">
           <div 
             onClick={(e) => { e.stopPropagation(); onProfileClick?.(video.creatorId); }}
             className="w-12 h-12 rounded-full border-2 border-white overflow-hidden shadow-lg relative cursor-pointer"
@@ -129,15 +130,29 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, isActive, onLiveCli
               LIVE
             </div>
           </div>
-          <button 
+          
+          <motion.button 
+            whileTap={{ scale: 0.9 }}
             onClick={(e) => { e.stopPropagation(); setIsFollowing(!isFollowing); }}
             className={cn(
-              "absolute -bottom-2 left-1/2 -translate-x-1/2 rounded-full p-0.5 text-white shadow-lg z-10 transition-all",
-              isFollowing ? "bg-vortex-accent scale-0" : "bg-vortex-secondary scale-100"
+              "w-8 h-8 rounded-full flex items-center justify-center transition-all shadow-lg",
+              isFollowing 
+                ? "bg-white/10 text-white/60 border border-white/20" 
+                : "bg-vortex-accent text-white border border-vortex-accent shadow-[0_0_15px_rgba(124,58,237,0.5)] hover:scale-110"
             )}
           >
-            <Plus size={14} />
-          </button>
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={isFollowing ? 'following' : 'follow'}
+                initial={{ scale: 0, rotate: -45 }}
+                animate={{ scale: 1, rotate: 0 }}
+                exit={{ scale: 0, rotate: 45 }}
+                transition={{ duration: 0.2 }}
+              >
+                {isFollowing ? <UserCheck size={16} /> : <UserPlus size={16} />}
+              </motion.div>
+            </AnimatePresence>
+          </motion.button>
         </div>
 
         {/* Like */}
@@ -148,7 +163,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, isActive, onLiveCli
           >
             <Heart size={32} fill={isLiked ? "currentColor" : "none"} />
           </motion.div>
-          <span className="text-xs font-mono font-bold drop-shadow-md">{video.likesCount + (isLiked ? 1 : 0)}</span>
+          <span className="text-xs font-mono font-bold drop-shadow-md">{(video.likesCount || 0) + (isLiked ? 1 : 0)}</span>
         </button>
 
         {/* Comments */}
@@ -159,7 +174,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, isActive, onLiveCli
           <div className="p-2">
             <MessageCircle size={32} />
           </div>
-          <span className="text-xs font-mono font-bold drop-shadow-md">{video.commentsCount}</span>
+          <span className="text-xs font-mono font-bold drop-shadow-md">{video.commentsCount || 0}</span>
         </button>
 
         {/* Save */}
@@ -167,7 +182,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, isActive, onLiveCli
           <div className={cn("p-2 transition-colors", isSaved ? "text-vortex-gold" : "text-white")}>
             <Bookmark size={32} fill={isSaved ? "currentColor" : "none"} />
           </div>
-          <span className="text-xs font-mono font-bold drop-shadow-md">{video.sharesCount}</span>
+          <span className="text-xs font-mono font-bold drop-shadow-md">{video.sharesCount || 0}</span>
         </button>
 
         {/* Share */}
@@ -176,25 +191,14 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, isActive, onLiveCli
             <Share2 size={32} />
           </div>
         </button>
-
-        {/* Coins / Tip */}
-        <button className="flex flex-col items-center gap-1 text-vortex-highlight">
-          <div className="p-2 glass rounded-full">
-            <Coins size={24} />
-          </div>
-        </button>
-
-        {/* More */}
-        <button className="text-white/60">
-          <MoreVertical size={24} />
-        </button>
       </div>
 
       {/* Bottom Info */}
       <div className="absolute bottom-28 left-4 right-20 z-10 pointer-events-none">
         <div className="flex items-center gap-3 mb-1 pointer-events-auto">
           <h3 className="font-display text-base font-bold drop-shadow-lg">@{video.creatorName}</h3>
-          <button 
+          <motion.button 
+            whileTap={{ scale: 0.95 }}
             onClick={(e) => { e.stopPropagation(); setIsFollowing(!isFollowing); }}
             className={cn(
               "px-3 py-0.5 rounded-full text-[10px] font-bold border transition-all",
@@ -204,7 +208,7 @@ export const VideoCard: React.FC<VideoCardProps> = ({ video, isActive, onLiveCli
             )}
           >
             {isFollowing ? 'Seguindo' : 'Seguir'}
-          </button>
+          </motion.button>
         </div>
         <p className="text-xs text-white/90 line-clamp-2 mb-2 drop-shadow-md">
           {video.description}

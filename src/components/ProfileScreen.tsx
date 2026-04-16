@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
-import { motion } from 'motion/react';
-import { Settings, Edit2, Grid, Heart, Repeat, Radio, Link as LinkIcon, MapPin, Star, Coins, LogOut } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import { Settings, Edit2, Grid, Heart, Repeat, Radio, Link as LinkIcon, MapPin, Star, Coins, LogOut, Shield, CheckCircle, Clock, AlertTriangle, X, Loader2 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { UserProfile } from '../types';
-import { logOut } from '../firebase';
+import { UserProfile, HostRequest } from '../types';
+import { logOut, db, auth } from '../firebase';
+import { collection, addDoc, serverTimestamp, query, where, getDocs, limit } from 'firebase/firestore';
 
 interface ProfileScreenProps {
   profile: UserProfile;
@@ -14,6 +15,60 @@ interface ProfileScreenProps {
 export const ProfileScreen: React.FC<ProfileScreenProps> = ({ profile, onEdit, onOpenShop }) => {
   const [activeTab, setActiveTab] = useState('videos');
   const [showSettings, setShowSettings] = useState(false);
+  const [showHostForm, setShowHostForm] = useState(false);
+  const [hostRequest, setHostRequest] = useState<HostRequest | null>(null);
+  const [loadingRequest, setLoadingRequest] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [form, setForm] = useState({ reason: '', experience: '' });
+
+  useEffect(() => {
+    checkHostRequest();
+  }, [profile.uid]);
+
+  const checkHostRequest = async () => {
+    try {
+      const q = query(
+        collection(db, 'host_requests'),
+        where('uid', '==', profile.uid),
+        limit(1)
+      );
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        setHostRequest({ id: snap.docs[0].id, ...snap.docs[0].data() } as HostRequest);
+      }
+    } catch (error) {
+      console.error("Error checking host request:", error);
+    } finally {
+      setLoadingRequest(false);
+    }
+  };
+
+  const submitHostRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!auth.currentUser) return;
+    setSubmitting(true);
+
+    try {
+      const newRequest = {
+        uid: auth.currentUser.uid,
+        username: profile.username,
+        displayName: profile.displayName,
+        photoURL: profile.photoURL,
+        reason: form.reason,
+        experience: form.experience,
+        status: 'pending',
+        createdAt: serverTimestamp()
+      };
+
+      await addDoc(collection(db, 'host_requests'), newRequest);
+      await checkHostRequest();
+      setShowHostForm(false);
+    } catch (error) {
+      console.error("Error submitting host request:", error);
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   const tabs = [
     { id: 'videos', icon: Grid, label: 'Vídeos' },
@@ -110,6 +165,43 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ profile, onEdit, o
         </div>
 
         <div className="flex flex-col gap-3 mb-8">
+          {!profile.isHost && !loadingRequest && (
+            <div className="p-4 glass rounded-2xl border border-white/10 space-y-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-vortex-accent/20 rounded-xl text-vortex-accent">
+                  <Shield size={20} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold">Programa de Hosts</h3>
+                  <p className="text-[10px] text-white/40">Torne-se um host oficial e faça transmissões ao vivo.</p>
+                </div>
+              </div>
+
+              {hostRequest ? (
+                <div className={cn(
+                  "flex items-center gap-2 px-4 py-3 rounded-xl text-xs font-bold",
+                  hostRequest.status === 'pending' ? "bg-yellow-500/10 text-yellow-500 border border-yellow-500/20" :
+                  hostRequest.status === 'approved' ? "bg-green-500/10 text-green-500 border border-green-500/20" :
+                  "bg-red-500/10 text-red-400 border border-red-500/20"
+                )}>
+                  {hostRequest.status === 'pending' ? <Clock size={14} /> : 
+                   hostRequest.status === 'approved' ? <CheckCircle size={14} /> : 
+                   <AlertTriangle size={14} />}
+                  {hostRequest.status === 'pending' ? 'Solicitação em análise...' :
+                   hostRequest.status === 'approved' ? 'Você agora é um host!' :
+                   'Solicitação recusada. Tente novamente mais tarde.'}
+                </div>
+              ) : (
+                <button 
+                  onClick={() => setShowHostForm(true)}
+                  className="w-full py-3 bg-vortex-accent text-white rounded-xl text-xs font-bold shadow-lg shadow-vortex-accent/20 hover:scale-[1.02] active:scale-[0.98] transition-all"
+                >
+                  Quero ser Host
+                </button>
+              )}
+            </div>
+          )}
+
           <button 
             onClick={handleLogout}
             className="w-full py-3 bg-red-500/10 border border-red-500/20 rounded-2xl text-red-400 text-sm font-bold flex items-center justify-center gap-2 hover:bg-red-500/20 transition-all"
@@ -137,6 +229,89 @@ export const ProfileScreen: React.FC<ProfileScreenProps> = ({ profile, onEdit, o
           ))}
         </div>
       </div>
+
+      <HostFormModal 
+        isOpen={showHostForm}
+        onClose={() => setShowHostForm(false)}
+        onSubmit={submitHostRequest}
+        form={form}
+        setForm={setForm}
+        submitting={submitting}
+      />
     </div>
+  );
+};
+
+const HostFormModal = ({ isOpen, onClose, onSubmit, form, setForm, submitting }: any) => {
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={onClose}
+            className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+          />
+          <motion.div 
+            initial={{ scale: 0.9, opacity: 0, y: 20 }}
+            animate={{ scale: 1, opacity: 1, y: 0 }}
+            exit={{ scale: 0.9, opacity: 0, y: 20 }}
+            className="relative w-full max-w-sm bg-vortex-surface border border-white/10 rounded-[32px] p-8 shadow-2xl"
+          >
+            <button 
+              onClick={onClose}
+              className="absolute top-6 right-6 p-2 hover:bg-white/5 rounded-full text-white/40"
+            >
+              <X size={20} />
+            </button>
+
+            <div className="flex flex-col items-center text-center gap-4 mb-8">
+              <div className="p-4 bg-vortex-accent/20 rounded-full text-vortex-accent">
+                <Shield size={32} />
+              </div>
+              <div>
+                <h3 className="text-xl font-display font-bold">Solicitação de Host</h3>
+                <p className="text-sm text-white/40 mt-2">Conte-nos por que você quer ser um host no VORTEX.</p>
+              </div>
+            </div>
+
+            <form onSubmit={onSubmit} className="space-y-6">
+              <div className="space-y-2">
+                <label className="text-[10px] uppercase tracking-widest text-white/40 font-bold">Por que ser host?</label>
+                <textarea 
+                  required
+                  value={form.reason}
+                  onChange={(e) => setForm({ ...form, reason: e.target.value })}
+                  placeholder="Ex: Quero compartilhar meu talento musical..."
+                  className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-sm outline-none focus:border-vortex-accent min-h-[100px] resize-none"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[10px] uppercase tracking-widest text-white/40 font-bold">Experiência com Lives</label>
+                <textarea 
+                  required
+                  value={form.experience}
+                  onChange={(e) => setForm({ ...form, experience: e.target.value })}
+                  placeholder="Ex: Já fiz lives em outras plataformas..."
+                  className="w-full bg-white/5 border border-white/10 rounded-2xl px-4 py-3 text-sm outline-none focus:border-vortex-accent min-h-[80px] resize-none"
+                />
+              </div>
+
+              <button 
+                type="submit"
+                disabled={submitting}
+                className="w-full py-4 bg-vortex-accent text-white rounded-2xl font-bold shadow-lg shadow-vortex-accent/20 flex items-center justify-center gap-2 disabled:opacity-50"
+              >
+                {submitting ? <Loader2 className="animate-spin" size={20} /> : <CheckCircle size={20} />}
+                {submitting ? 'Enviando...' : 'Enviar Solicitação'}
+              </button>
+            </form>
+          </motion.div>
+        </div>
+      )}
+    </AnimatePresence>
   );
 };

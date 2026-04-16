@@ -51,8 +51,11 @@ service cloud.firestore {
 
     function isAdmin() {
       return isAuthenticated() && 
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-         (request.auth.token.email == "rbvideos0441@gmail.com" && request.auth.token.email_verified == true));
+        (
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
+          request.auth.token.email == "rbvideos0441@gmail.com"
+        );
     }
 
     function isValidUser(data) {
@@ -68,6 +71,7 @@ service cloud.firestore {
              (!('pronouns' in data) || (data.pronouns is string && data.pronouns.size() <= 20)) &&
              (!('followersCount' in data) || data.followersCount is number) &&
              (!('coins' in data) || data.coins is number) &&
+             (!('isHost' in data) || data.isHost is bool) &&
              (!('role' in data) || data.role in ['admin', 'user']);
     }
 
@@ -77,6 +81,15 @@ service cloud.firestore {
              data.videoUrl is string && data.videoUrl.matches("^https?://.*") &&
              (!('description' in data) || (data.description is string && data.description.size() <= 500)) &&
              (!('likesCount' in data) || data.likesCount is number);
+    }
+
+    function isValidCoinPackage(data) {
+      return data.keys().hasAll(['id', 'coins', 'price', 'bonus', 'popular']) &&
+             data.id is string &&
+             data.coins is number &&
+             data.price is string &&
+             data.bonus is number &&
+             data.popular is bool;
     }
 
     // ===============================================================
@@ -130,6 +143,28 @@ service cloud.firestore {
           request.auth.uid == get(/databases/$(database)/documents/lives/$(liveId)).data.creatorId
         );
       }
+    }
+
+    match /coin_packages/{packageId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /app_settings/{settingId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /stream_access/{accessId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+    }
+
+    match /host_requests/{requestId} {
+      allow read: if isAuthenticated() && (request.auth.uid == resource.data.uid || isAdmin());
+      allow create: if isAuthenticated() && request.resource.data.uid == request.auth.uid;
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
     }
   }
 }

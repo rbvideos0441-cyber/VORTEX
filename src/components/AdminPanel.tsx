@@ -1,25 +1,51 @@
 import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Users, Video as VideoIcon, Radio, Shield, Search, Trash2, 
   CheckCircle, XCircle, AlertTriangle, BarChart3,
-  TrendingUp, MessageSquare, Flag, Settings
+  TrendingUp, MessageSquare, Flag, Settings, Coins, Plus, Save, Loader2
 } from 'lucide-react';
 import { db } from '../firebase';
 import { 
   collection, getDocs, deleteDoc, doc, 
-  updateDoc, query, orderBy, limit, where 
+  updateDoc, query, orderBy, limit, where, setDoc
 } from 'firebase/firestore';
-import { UserProfile, Video, LiveStream } from '../types';
+import { UserProfile, Video, LiveStream, CoinPackage, HostRequest } from '../types';
 import { cn } from '../lib/utils';
 
 export const AdminPanel: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'videos' | 'lives' | 'reports'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'videos' | 'lives' | 'reports' | 'shop' | 'settings' | 'host_requests'>('overview');
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [videos, setVideos] = useState<Video[]>([]);
   const [lives, setLives] = useState<LiveStream[]>([]);
+  const [coinPackages, setCoinPackages] = useState<CoinPackage[]>([]);
+  const [hostRequests, setHostRequests] = useState<HostRequest[]>([]);
+  const [globalSettings, setGlobalSettings] = useState<{
+    liveEntryFee: number;
+    requireEntryFee: boolean;
+  }>({ liveEntryFee: 0, requireEntryFee: false });
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [savingId, setSavingId] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error', message: string } | null>(null);
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {}
+  });
+
+  useEffect(() => {
+    if (feedback) {
+      const timer = setTimeout(() => setFeedback(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [feedback]);
 
   useEffect(() => {
     fetchData();
@@ -40,23 +66,152 @@ export const AdminPanel: React.FC = () => {
         const livesSnap = await getDocs(collection(db, 'lives'));
         setLives(livesSnap.docs.map(d => d.data() as LiveStream));
       }
+      if (activeTab === 'shop') {
+        const packagesSnap = await getDocs(collection(db, 'coin_packages'));
+        if (packagesSnap.empty) {
+          // Default packages if none exist
+          const defaults: CoinPackage[] = [
+            { id: '1', coins: 100, price: 'R$ 4,90', bonus: 0, popular: false },
+            { id: '2', coins: 500, price: 'R$ 19,90', bonus: 50, popular: true },
+            { id: '3', coins: 1200, price: 'R$ 44,90', bonus: 150, popular: false },
+          ];
+          setCoinPackages(defaults);
+        } else {
+          setCoinPackages(packagesSnap.docs.map(d => d.data() as CoinPackage));
+        }
+      }
+      if (activeTab === 'settings' || activeTab === 'overview') {
+        const settingsSnap = await getDocs(collection(db, 'app_settings'));
+        if (!settingsSnap.empty) {
+          const data = settingsSnap.docs[0].data();
+          setGlobalSettings({
+            liveEntryFee: data.liveEntryFee || 0,
+            requireEntryFee: data.requireEntryFee || false
+          });
+        }
+      }
+      if (activeTab === 'host_requests' || activeTab === 'overview') {
+        const requestsSnap = await getDocs(query(collection(db, 'host_requests'), orderBy('createdAt', 'desc')));
+        setHostRequests(requestsSnap.docs.map(d => ({ id: d.id, ...d.data() } as HostRequest)));
+      }
     } catch (error) {
       console.error("Error fetching admin data:", error);
     }
     setLoading(false);
   };
 
-  const deleteUser = async (uid: string) => {
-    if (window.confirm('Tem certeza que deseja excluir este usuário? Esta ação é irreversível.')) {
-      await deleteDoc(doc(db, 'users', uid));
-      setUsers(users.filter(u => u.uid !== uid));
+  const saveCoinPackage = async (pkg: CoinPackage) => {
+    setSavingId(pkg.id);
+    try {
+      await setDoc(doc(db, 'coin_packages', pkg.id), pkg);
+      setFeedback({ type: 'success', message: 'Pacote salvo com sucesso!' });
+    } catch (error) {
+      console.error("Error saving coin package:", error);
+      setFeedback({ type: 'error', message: 'Erro ao salvar pacote. Verifique permissões.' });
+    } finally {
+      setSavingId(null);
     }
   };
 
+  const addCoinPackage = () => {
+    const newPkg: CoinPackage = {
+      id: Date.now().toString(),
+      coins: 1000,
+      price: 'R$ 0,00',
+      bonus: 0,
+      popular: false
+    };
+    setCoinPackages([...coinPackages, newPkg]);
+  };
+
+  const removeCoinPackage = async (id: string) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Excluir Pacote',
+      message: 'Tem certeza que deseja excluir este pacote de moedas?',
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'coin_packages', id));
+          setCoinPackages(coinPackages.filter(p => p.id !== id));
+          setFeedback({ type: 'success', message: 'Pacote removido!' });
+        } catch (error) {
+          console.error("Error removing coin package:", error);
+          setFeedback({ type: 'error', message: 'Erro ao remover pacote.' });
+        }
+        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+      }
+    });
+  };
+
+  const deleteUser = async (uid: string) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Excluir Usuário',
+      message: 'Tem certeza que deseja excluir este usuário? Esta ação é irreversível.',
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'users', uid));
+          setUsers(users.filter(u => u.uid !== uid));
+          setFeedback({ type: 'success', message: 'Usuário excluído!' });
+        } catch (error) {
+          console.error("Error deleting user:", error);
+          setFeedback({ type: 'error', message: 'Erro ao excluir usuário.' });
+        }
+        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+      }
+    });
+  };
+
   const deleteVideo = async (id: string) => {
-    if (window.confirm('Excluir este vídeo?')) {
-      await deleteDoc(doc(db, 'videos', id));
-      setVideos(videos.filter(v => v.id !== id));
+    setConfirmModal({
+      isOpen: true,
+      title: 'Excluir Vídeo',
+      message: 'Tem certeza que deseja excluir este vídeo?',
+      onConfirm: async () => {
+        try {
+          await deleteDoc(doc(db, 'videos', id));
+          setVideos(videos.filter(v => v.id !== id));
+          setFeedback({ type: 'success', message: 'Vídeo excluído!' });
+        } catch (error) {
+          console.error("Error deleting video:", error);
+          setFeedback({ type: 'error', message: 'Erro ao excluir vídeo.' });
+        }
+        setConfirmModal(prev => ({ ...prev, isOpen: false }));
+      }
+    });
+  };
+
+  const saveGlobalSettings = async () => {
+    setSavingId('global_settings');
+    try {
+      await setDoc(doc(db, 'app_settings', 'general'), globalSettings);
+      setFeedback({ type: 'success', message: 'Configurações salvas!' });
+    } catch (error) {
+      console.error("Error saving settings:", error);
+      setFeedback({ type: 'error', message: 'Erro ao salvar configurações.' });
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const handleHostRequest = async (request: HostRequest, status: 'approved' | 'rejected') => {
+    setSavingId(request.id);
+    try {
+      // Update request status
+      await updateDoc(doc(db, 'host_requests', request.id), { status });
+      
+      // If approved, update user profile
+      if (status === 'approved') {
+        await updateDoc(doc(db, 'users', request.uid), { isHost: true });
+      }
+
+      setHostRequests(hostRequests.map(r => r.id === request.id ? { ...r, status } : r));
+      setFeedback({ type: 'success', message: `Solicitação ${status === 'approved' ? 'aprovada' : 'recusada'}!` });
+    } catch (error) {
+      console.error("Error handling host request:", error);
+      setFeedback({ type: 'error', message: 'Erro ao processar solicitação.' });
+    } finally {
+      setSavingId(null);
     }
   };
 
@@ -101,6 +256,9 @@ export const AdminPanel: React.FC = () => {
             { id: 'users', label: 'Usuários', icon: Users },
             { id: 'videos', label: 'Vídeos', icon: VideoIcon },
             { id: 'lives', label: 'Transmissões', icon: Radio },
+            { id: 'host_requests', label: 'Solicitações Host', icon: Shield },
+            { id: 'shop', label: 'Loja de Moedas', icon: Coins },
+            { id: 'settings', label: 'Configurações', icon: Settings },
             { id: 'reports', label: 'Denúncias', icon: Flag },
           ].map(tab => {
             const Icon = tab.icon;
@@ -136,9 +294,9 @@ export const AdminPanel: React.FC = () => {
               <div className="space-y-6 md:space-y-8">
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
                   {[
-                    { label: 'Total Usuários', value: users.length, icon: Users, color: 'text-blue-400' },
-                    { label: 'Vídeos Postados', value: videos.length, icon: VideoIcon, color: 'text-vortex-accent' },
-                    { label: 'Lives Ativas', value: lives.filter(l => l.isLive).length, icon: Radio, color: 'text-vortex-secondary' },
+                    { label: 'Total Usuários', value: users.length || 0, icon: Users, color: 'text-blue-400' },
+                    { label: 'Vídeos Postados', value: videos.length || 0, icon: VideoIcon, color: 'text-vortex-accent' },
+                    { label: 'Lives Ativas', value: lives.filter(l => l.isLive).length || 0, icon: Radio, color: 'text-vortex-secondary' },
                     { label: 'Novas Denúncias', value: 0, icon: Flag, color: 'text-red-400' },
                   ].map((stat, i) => (
                     <div key={i} className="glass p-4 md:p-6 rounded-[20px] md:rounded-[24px] border border-white/5">
@@ -190,6 +348,80 @@ export const AdminPanel: React.FC = () => {
               </div>
             )}
 
+            {activeTab === 'host_requests' && (
+              <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xl font-display font-bold">Solicitações de Host</h3>
+                    <p className="text-xs text-white/40">Analise os pedidos de usuários para se tornarem hosts oficiais.</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4">
+                  {hostRequests.length === 0 ? (
+                    <div className="glass p-12 rounded-[32px] border border-white/5 flex flex-col items-center justify-center text-white/20">
+                      <Shield size={48} />
+                      <p className="text-sm mt-4 font-bold uppercase tracking-widest">Nenhuma solicitação pendente</p>
+                    </div>
+                  ) : (
+                    hostRequests.map(request => (
+                      <div key={request.id} className="glass p-6 rounded-[32px] border border-white/10 space-y-6">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-4">
+                            <img src={request.photoURL} className="w-12 h-12 rounded-full border border-white/10" referrerPolicy="no-referrer" />
+                            <div>
+                              <h4 className="font-bold">{request.displayName}</h4>
+                              <p className="text-xs text-white/40">@{request.username}</p>
+                            </div>
+                          </div>
+                          <div className={cn(
+                            "px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest",
+                            request.status === 'pending' ? "bg-yellow-500/20 text-yellow-500" :
+                            request.status === 'approved' ? "bg-green-500/20 text-green-500" :
+                            "bg-red-500/20 text-red-400"
+                          )}>
+                            {request.status === 'pending' ? 'Pendente' :
+                             request.status === 'approved' ? 'Aprovado' : 'Recusado'}
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                          <div className="space-y-2">
+                            <p className="text-[10px] uppercase tracking-widest text-white/40 font-bold">Motivo</p>
+                            <p className="text-sm text-white/80 bg-white/5 p-4 rounded-2xl border border-white/5">{request.reason}</p>
+                          </div>
+                          <div className="space-y-2">
+                            <p className="text-[10px] uppercase tracking-widest text-white/40 font-bold">Experiência</p>
+                            <p className="text-sm text-white/80 bg-white/5 p-4 rounded-2xl border border-white/5">{request.experience}</p>
+                          </div>
+                        </div>
+
+                        {request.status === 'pending' && (
+                          <div className="flex items-center gap-3 pt-2">
+                            <button 
+                              onClick={() => handleHostRequest(request, 'approved')}
+                              disabled={savingId === request.id}
+                              className="flex-1 py-3 bg-green-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-green-500/20 flex items-center justify-center gap-2 disabled:opacity-50"
+                            >
+                              {savingId === request.id ? <Loader2 className="animate-spin" size={16} /> : <CheckCircle size={16} />}
+                              Aprovar
+                            </button>
+                            <button 
+                              onClick={() => handleHostRequest(request, 'rejected')}
+                              disabled={savingId === request.id}
+                              className="flex-1 py-3 bg-red-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-red-500/20 flex items-center justify-center gap-2 disabled:opacity-50"
+                            >
+                              {savingId === request.id ? <Loader2 className="animate-spin" size={16} /> : <XCircle size={16} />}
+                              Recusar
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
             {activeTab === 'users' && (
               <div className="glass rounded-[24px] md:rounded-[32px] border border-white/5 overflow-x-auto no-scrollbar">
                 <table className="w-full text-left border-collapse min-w-[600px]">
@@ -224,7 +456,7 @@ export const AdminPanel: React.FC = () => {
                             {user.isPremium ? 'Premium' : 'Free'}
                           </span>
                         </td>
-                        <td className="p-4 font-mono text-sm">{user.coins}</td>
+                        <td className="p-4 font-mono text-sm">{user.coins || 0}</td>
                         <td className="p-4">
                           <div className="flex items-center gap-2">
                             <button 
@@ -260,8 +492,8 @@ export const AdminPanel: React.FC = () => {
                       <p className="text-[8px] md:text-[10px] text-white/60">@{video.creatorName}</p>
                       <div className="flex items-center justify-between mt-2 md:mt-3">
                         <div className="flex items-center gap-2 text-[8px] md:text-[10px] text-white/40">
-                          <span>❤️ {video.likesCount}</span>
-                          <span>💬 {video.commentsCount}</span>
+                          <span>❤️ {video.likesCount || 0}</span>
+                          <span>💬 {video.commentsCount || 0}</span>
                         </div>
                         <button 
                           onClick={() => deleteVideo(video.id)}
@@ -283,9 +515,257 @@ export const AdminPanel: React.FC = () => {
                 <p className="text-xs mt-1">A plataforma está limpa! ✨</p>
               </div>
             )}
+
+            {activeTab === 'settings' && (
+              <div className="space-y-6 max-w-2xl">
+                <div className="glass p-8 rounded-[32px] border border-white/10 space-y-8">
+                  <div className="flex items-center gap-4">
+                    <div className="p-3 bg-vortex-accent/20 rounded-2xl text-vortex-accent">
+                      <Radio size={24} />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-display font-bold">Transmissões ao Vivo</h3>
+                      <p className="text-sm text-white/40">Configure as regras de entrada para lives.</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-6">
+                    <div className="flex items-center justify-between p-4 bg-white/5 rounded-2xl border border-white/5">
+                      <div>
+                        <p className="text-sm font-bold">Cobrar Entrada</p>
+                        <p className="text-xs text-white/40">Exigir moedas para entrar em qualquer live.</p>
+                      </div>
+                      <button 
+                        onClick={() => setGlobalSettings(prev => ({ ...prev, requireEntryFee: !prev.requireEntryFee }))}
+                        className={cn(
+                          "w-12 h-6 rounded-full transition-all relative",
+                          globalSettings.requireEntryFee ? "bg-vortex-accent" : "bg-white/10"
+                        )}
+                      >
+                        <div className={cn(
+                          "absolute top-1 w-4 h-4 bg-white rounded-full transition-all",
+                          globalSettings.requireEntryFee ? "left-7" : "left-1"
+                        )} />
+                      </button>
+                    </div>
+
+                    {globalSettings.requireEntryFee && (
+                      <motion.div 
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="space-y-2"
+                      >
+                        <label className="text-[10px] uppercase tracking-widest text-white/40 font-bold">Valor da Entrada (Moedas)</label>
+                        <div className="relative">
+                          <Coins className="absolute left-4 top-1/2 -translate-y-1/2 text-vortex-gold" size={18} />
+                          <input 
+                            type="number"
+                            value={globalSettings.liveEntryFee}
+                            onChange={(e) => setGlobalSettings(prev => ({ ...prev, liveEntryFee: parseInt(e.target.value) || 0 }))}
+                            className="w-full bg-white/5 border border-white/10 rounded-2xl pl-12 pr-4 py-4 text-lg font-bold outline-none focus:border-vortex-accent"
+                          />
+                        </div>
+                      </motion.div>
+                    )}
+                  </div>
+
+                  <button 
+                    onClick={saveGlobalSettings}
+                    disabled={savingId === 'global_settings'}
+                    className="w-full py-4 bg-vortex-accent text-white rounded-2xl font-bold shadow-lg shadow-vortex-accent/20 flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    {savingId === 'global_settings' ? <Loader2 className="animate-spin" size={20} /> : <Save size={20} />}
+                    {savingId === 'global_settings' ? 'Salvando...' : 'Salvar Configurações'}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'shop' && (
+              <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xl font-display font-bold">Configuração da Loja</h3>
+                    <p className="text-xs text-white/40">Gerencie os pacotes de moedas disponíveis para os usuários.</p>
+                  </div>
+                  <button 
+                    onClick={addCoinPackage}
+                    className="px-4 py-2 bg-vortex-accent text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg shadow-vortex-accent/20"
+                  >
+                    <Plus size={16} />
+                    Novo Pacote
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {coinPackages.map((pkg, index) => (
+                    <div key={pkg.id} className="glass p-6 rounded-[24px] border border-white/10 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className="p-2 bg-vortex-gold/20 rounded-lg">
+                            <Coins className="text-vortex-gold" size={20} />
+                          </div>
+                          <span className="text-sm font-bold">Pacote #{index + 1}</span>
+                        </div>
+                        <button 
+                          onClick={() => removeCoinPackage(pkg.id)}
+                          className="p-2 hover:bg-red-500/20 text-red-400 rounded-lg transition-all"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                          <label className="text-[10px] uppercase tracking-widest text-white/40 font-bold">Moedas</label>
+                          <input 
+                            type="number"
+                            value={pkg.coins || 0}
+                            onChange={(e) => {
+                              const val = e.target.value === '' ? 0 : parseInt(e.target.value);
+                              const newPkgs = [...coinPackages];
+                              newPkgs[index].coins = isNaN(val) ? 0 : val;
+                              setCoinPackages(newPkgs);
+                            }}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm outline-none focus:border-vortex-accent"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] uppercase tracking-widest text-white/40 font-bold">Bônus</label>
+                          <input 
+                            type="number"
+                            value={pkg.bonus || 0}
+                            onChange={(e) => {
+                              const val = e.target.value === '' ? 0 : parseInt(e.target.value);
+                              const newPkgs = [...coinPackages];
+                              newPkgs[index].bonus = isNaN(val) ? 0 : val;
+                              setCoinPackages(newPkgs);
+                            }}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm outline-none focus:border-vortex-accent"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                          <label className="text-[10px] uppercase tracking-widest text-white/40 font-bold">Preço (Texto)</label>
+                          <input 
+                            type="text"
+                            value={pkg.price}
+                            onChange={(e) => {
+                              const newPkgs = [...coinPackages];
+                              newPkgs[index].price = e.target.value;
+                              setCoinPackages(newPkgs);
+                            }}
+                            className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-sm outline-none focus:border-vortex-accent"
+                          />
+                        </div>
+                        <div className="flex items-end pb-1">
+                          <label className="flex items-center gap-2 cursor-pointer group">
+                            <input 
+                              type="checkbox"
+                              checked={pkg.popular}
+                              onChange={(e) => {
+                                const newPkgs = [...coinPackages];
+                                newPkgs[index].popular = e.target.checked;
+                                setCoinPackages(newPkgs);
+                              }}
+                              className="hidden"
+                            />
+                            <div className={cn(
+                              "w-5 h-5 rounded border flex items-center justify-center transition-all",
+                              pkg.popular ? "bg-vortex-accent border-vortex-accent" : "border-white/20"
+                            )}>
+                              {pkg.popular && <CheckCircle size={12} />}
+                            </div>
+                            <span className="text-xs font-bold text-white/60 group-hover:text-white transition-colors">Destaque Popular</span>
+                          </label>
+                        </div>
+                      </div>
+
+                      <button 
+                        onClick={() => saveCoinPackage(pkg)}
+                        disabled={savingId === pkg.id}
+                        className="w-full py-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                      >
+                        {savingId === pkg.id ? (
+                          <Loader2 className="animate-spin" size={16} />
+                        ) : (
+                          <Save size={16} />
+                        )}
+                        {savingId === pkg.id ? 'Salvando...' : 'Salvar Alterações'}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
+
+      {/* Feedback Toast */}
+      <AnimatePresence>
+        {feedback && (
+          <motion.div
+            initial={{ opacity: 0, y: 50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 50 }}
+            className={cn(
+              "fixed bottom-8 left-1/2 -translate-x-1/2 px-6 py-3 rounded-2xl shadow-2xl z-[200] flex items-center gap-3 border backdrop-blur-xl",
+              feedback.type === 'success' ? "bg-green-500/20 border-green-500/50 text-green-400" : "bg-red-500/20 border-red-500/50 text-red-400"
+            )}
+          >
+            {feedback.type === 'success' ? <CheckCircle size={20} /> : <AlertTriangle size={20} />}
+            <span className="text-sm font-bold">{feedback.message}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Confirmation Modal */}
+      <AnimatePresence>
+        {confirmModal.isOpen && (
+          <div className="fixed inset-0 z-[250] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="relative w-full max-w-sm bg-vortex-surface border border-white/10 rounded-[32px] p-8 shadow-2xl"
+            >
+              <div className="flex flex-col items-center text-center gap-4">
+                <div className="p-4 bg-red-500/20 rounded-full text-red-500">
+                  <AlertTriangle size={32} />
+                </div>
+                <div>
+                  <h3 className="text-xl font-display font-bold">{confirmModal.title}</h3>
+                  <p className="text-sm text-white/60 mt-2">{confirmModal.message}</p>
+                </div>
+                <div className="grid grid-cols-2 gap-3 w-full mt-4">
+                  <button 
+                    onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+                    className="py-3 rounded-xl bg-white/5 hover:bg-white/10 text-xs font-bold transition-all"
+                  >
+                    Cancelar
+                  </button>
+                  <button 
+                    onClick={confirmModal.onConfirm}
+                    className="py-3 rounded-xl bg-red-500 text-white text-xs font-bold shadow-lg shadow-red-500/20 transition-all"
+                  >
+                    Confirmar
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

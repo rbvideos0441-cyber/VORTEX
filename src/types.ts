@@ -1,3 +1,11 @@
+export interface CoinPackage {
+  id: string;
+  coins: number;
+  price: string;
+  bonus: number;
+  popular: boolean;
+}
+
 export interface UserProfile {
   uid: string;
   displayName: string;
@@ -17,6 +25,19 @@ export interface UserProfile {
   interests: string[];
   onboardingCompleted: boolean;
   role?: 'admin' | 'user';
+  isHost?: boolean;
+  createdAt: any;
+}
+
+export interface HostRequest {
+  id: string;
+  uid: string;
+  username: string;
+  displayName: string;
+  photoURL: string;
+  reason: string;
+  experience: string;
+  status: 'pending' | 'approved' | 'rejected';
   createdAt: any;
 }
 
@@ -69,11 +90,14 @@ export interface LiveStream {
   activeSlotCount: number;
   participants: LiveParticipant[];
   blockedUids?: string[];
+  moderatorUids?: string[];
   goal?: {
     current: number;
     target: number;
     label: string;
   };
+  entryFee?: number;
+  isPaid?: boolean;
 }
 
 export enum OperationType {

@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Users, Coins, Send, Mic, MicOff, Video, VideoOff, Share2, Heart, Hand, MessageCircle, Star, MoreHorizontal, Shield, Power, Plus, UserPlus, Lock, Unlock, Trophy, Zap, Check } from 'lucide-react';
+import { X, Users, Coins, Send, Mic, MicOff, Video, VideoOff, Share2, Heart, Hand, MessageCircle, Star, MoreHorizontal, Shield, Power, Plus, UserPlus, Lock, Unlock, Trophy, Zap, Check, AlertTriangle, Trash2, Camera, Loader2 } from 'lucide-react';
 import { cn } from '../lib/utils';
-import { LiveStream, LiveParticipant, LiveMessage } from '../types';
+import { LiveStream, LiveParticipant, LiveMessage, UserProfile } from '../types';
 import { db, auth } from '../firebase';
-import { doc, onSnapshot, updateDoc, collection, addDoc, query, orderBy, limit, serverTimestamp, arrayUnion, arrayRemove, setDoc, deleteDoc, getDocs } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc, collection, addDoc, query, orderBy, limit, serverTimestamp, arrayUnion, arrayRemove, setDoc, deleteDoc, getDocs, where, getDoc, increment } from 'firebase/firestore';
 
 interface LiveStreamScreenProps {
   live: LiveStream;
@@ -61,11 +61,21 @@ export const LiveStreamScreen: React.FC<LiveStreamScreenProps> = ({ live: initia
   const [selectedUserUid, setSelectedUserUid] = useState<string | null>(null);
   const [showShareMenu, setShowShareMenu] = useState(false);
   const [showCopyToast, setShowCopyToast] = useState(false);
+  const [friends, setFriends] = useState<any[]>([]);
+  const [sharedWith, setSharedWith] = useState<string[]>([]);
+  const [hasPaid, setHasPaid] = useState<boolean | null>(null);
+  const [globalSettings, setGlobalSettings] = useState<any>(null);
+  const [isPaying, setIsPaying] = useState(false);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
   const [videoFilter, setVideoFilter] = useState('none');
   const [videoQuality, setVideoQuality] = useState<'low' | 'medium' | 'high'>('medium');
   const [showEffectsMenu, setShowEffectsMenu] = useState(false);
+  const [permissionError, setPermissionError] = useState<string | null>(null);
+  const [showPermissionGuide, setShowPermissionGuide] = useState(false);
+  const [hasAttemptedMedia, setHasAttemptedMedia] = useState(false);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const isModerator = live.moderatorUids?.includes(auth.currentUser?.uid || '');
   const chatEndRef = useRef<HTMLDivElement>(null);
   const peerConnections = useRef<Record<string, RTCPeerConnection>>({});
 
@@ -74,6 +84,122 @@ export const LiveStreamScreen: React.FC<LiveStreamScreenProps> = ({ live: initia
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
     ],
+  };
+
+  // Fetch friends (simulated by fetching other users)
+  useEffect(() => {
+    if (!showShareMenu) return;
+    
+    const fetchFriends = async () => {
+      try {
+        const q = query(collection(db, 'users'), limit(10));
+        const querySnapshot = await getDocs(q);
+        const users = querySnapshot.docs
+          .map(doc => doc.data())
+          .filter(u => u.uid !== auth.currentUser?.uid);
+        setFriends(users);
+      } catch (err) {
+        console.error("Error fetching friends for sharing:", err);
+      }
+    };
+    
+    fetchFriends();
+  }, [showShareMenu]);
+
+  const shareWithFriend = async (friend: any) => {
+    if (sharedWith.includes(friend.uid)) return;
+    
+    // Simulate sharing (could be a notification or message in a real app)
+    setSharedWith(prev => [...prev, friend.uid]);
+    
+    // Add a system message to the chat locally to show it was shared
+    const shareMsg: LiveMessage = {
+      id: `share_${Date.now()}`,
+      uid: 'system',
+      username: 'Sistema',
+      text: `Você compartilhou a live com ${friend.displayName}!`,
+      type: 'system'
+    };
+    setMessages(prev => [...prev, shareMsg]);
+  };
+
+  // Fetch global settings and check access
+  useEffect(() => {
+    if (isHost) {
+      setHasPaid(true);
+      return;
+    }
+
+    const checkAccess = async () => {
+      try {
+        // Fetch settings
+        const settingsSnap = await getDocs(collection(db, 'app_settings'));
+        let settings = { requireEntryFee: false, liveEntryFee: 0 };
+        if (!settingsSnap.empty) {
+          settings = settingsSnap.docs[0].data() as any;
+        }
+        setGlobalSettings(settings);
+
+        if (!settings.requireEntryFee) {
+          setHasPaid(true);
+          return;
+        }
+
+        // Check if user already paid
+        const accessId = `${initialLive.id}_${auth.currentUser?.uid}`;
+        const accessSnap = await getDocs(query(collection(db, 'stream_access'), where('userId', '==', auth.currentUser?.uid), where('liveId', '==', initialLive.id)));
+        
+        if (!accessSnap.empty) {
+          setHasPaid(true);
+        } else {
+          setHasPaid(false);
+        }
+      } catch (err) {
+        console.error("Error checking stream access:", err);
+        // Fallback to allowing entry if error occurs to not block users
+        setHasPaid(true);
+      }
+    };
+
+    checkAccess();
+  }, [initialLive.id, isHost]);
+
+  const handlePayment = async () => {
+    if (!auth.currentUser || !globalSettings) return;
+    setIsPaying(true);
+    try {
+      const userRef = doc(db, 'users', auth.currentUser.uid);
+      const userSnap = await getDocs(query(collection(db, 'users'), where('uid', '==', auth.currentUser.uid)));
+      
+      if (userSnap.empty) throw new Error("Usuário não encontrado");
+      const userData = userSnap.docs[0].data();
+      
+      if ((userData.coins || 0) < globalSettings.liveEntryFee) {
+        alert("Moedas insuficientes!");
+        setIsPaying(false);
+        return;
+      }
+
+      // Deduct coins
+      await updateDoc(doc(db, 'users', auth.currentUser.uid), {
+        coins: (userData.coins || 0) - globalSettings.liveEntryFee
+      });
+
+      // Record access
+      await addDoc(collection(db, 'stream_access'), {
+        userId: auth.currentUser.uid,
+        liveId: initialLive.id,
+        paidAt: serverTimestamp(),
+        amount: globalSettings.liveEntryFee
+      });
+
+      setHasPaid(true);
+    } catch (err) {
+      console.error("Payment error:", err);
+      alert("Erro ao processar pagamento.");
+    } finally {
+      setIsPaying(false);
+    }
   };
 
   // Real-time Live State Sync
@@ -114,57 +240,106 @@ export const LiveStreamScreen: React.FC<LiveStreamScreenProps> = ({ live: initia
   }, [activeSlotCount, live.participants]);
 
   // Initialize Local Media
-  useEffect(() => {
-    const initMedia = async () => {
-      try {
-        // Stop existing tracks if quality changes
-        localStream?.getTracks().forEach(track => track.stop());
+  const initMedia = useCallback(async () => {
+    setHasAttemptedMedia(true);
+    try {
+      // Stop existing tracks if quality changes
+      localStreamRef.current?.getTracks().forEach(track => track.stop());
 
-        const getStream = async (withVideo: boolean) => {
-          const constraints = {
-            video: withVideo ? {
-              width: videoQuality === 'high' ? 1280 : videoQuality === 'medium' ? 640 : 320,
-              height: videoQuality === 'high' ? 720 : videoQuality === 'medium' ? 480 : 240,
-              frameRate: videoQuality === 'high' ? 30 : 24
-            } : false,
-            audio: true
-          };
-          return await navigator.mediaDevices.getUserMedia(constraints);
-        };
-
-        let stream: MediaStream;
-        try {
-          stream = await getStream(live.type === 'video');
-        } catch (videoErr) {
-          // Fallback to audio only if video device is not found or fails
-          console.warn("Video device not found or access denied, falling back to audio only:", videoErr);
-          stream = await getStream(false);
+      const getStream = async (withVideo: boolean) => {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          throw new Error('Browser does not support media devices');
         }
+        const constraints = {
+          video: withVideo ? {
+            width: videoQuality === 'high' ? 1280 : videoQuality === 'medium' ? 640 : 320,
+            height: videoQuality === 'high' ? 720 : videoQuality === 'medium' ? 480 : 240,
+            frameRate: videoQuality === 'high' ? 30 : 24
+          } : false,
+          audio: true
+        };
+        return await navigator.mediaDevices.getUserMedia(constraints);
+      };
+
+      let stream: MediaStream;
+      try {
+        // Try to get both video and audio
+        stream = await getStream(live.type === 'video');
+        setPermissionError(null);
+        setShowPermissionGuide(false);
+      } catch (videoErr: any) {
+        console.warn("Combined media access failed, trying fallback:", videoErr);
         
-        setLocalStream(stream);
+        const isNotFoundError = videoErr.name === 'NotFoundError' || videoErr.name === 'DevicesNotFoundError';
+        const isPermissionError = videoErr.name === 'NotAllowedError' || videoErr.name === 'PermissionDeniedError' || videoErr.message?.includes('denied');
 
-        // Update tracks in existing peer connections
-        Object.values(peerConnections.current).forEach((pc) => {
-          const peer = pc as RTCPeerConnection;
-          const senders = peer.getSenders();
-          stream.getTracks().forEach(track => {
-            const sender = senders.find(s => s.track?.kind === track.kind);
-            if (sender) sender.replaceTrack(track);
-          });
-        });
-      } catch (err) {
-        console.error("Error accessing media devices:", err);
+        if (isPermissionError) {
+          setShowPermissionGuide(true);
+          if (live.type === 'video') {
+            setPermissionError("Acesso à câmera ou microfone negado. Tentando apenas áudio...");
+          } else {
+            setPermissionError("Acesso ao microfone negado.");
+          }
+        } else if (isNotFoundError && live.type === 'video') {
+          // If camera not found, don't show error yet, just try audio
+          console.log("Camera not found, falling back to audio-only mode.");
+        }
+
+        try {
+          // Fallback: Try audio only
+          stream = await getStream(false);
+          setPermissionError(null);
+          setShowPermissionGuide(false);
+          
+          if (isNotFoundError && live.type === 'video') {
+            setPermissionError("Câmera não detectada. Iniciando em modo apenas áudio.");
+            // Clear this after a few seconds
+            setTimeout(() => setPermissionError(null), 5000);
+          }
+        } catch (audioErr: any) {
+          console.error("Error accessing audio device:", audioErr);
+          const isAudioPermissionError = audioErr.name === 'NotAllowedError' || audioErr.name === 'PermissionDeniedError' || audioErr.message?.includes('denied');
+          const isAudioNotFoundError = audioErr.name === 'NotFoundError' || audioErr.name === 'DevicesNotFoundError';
+
+          if (isAudioPermissionError) {
+            setShowPermissionGuide(true);
+            setPermissionError("O acesso ao microfone foi negado. Você precisa autorizar o acesso nas configurações do seu navegador.");
+          } else if (isAudioNotFoundError) {
+            setPermissionError("Nenhum microfone ou câmera foi encontrado. Verifique se estão conectados.");
+          } else if (audioErr.message === 'Browser does not support media devices') {
+            setPermissionError("Seu navegador não suporta acesso à câmera ou microfone.");
+          } else {
+            setPermissionError(`Erro de mídia: ${audioErr.message || 'Erro desconhecido'}`);
+          }
+          return;
+        }
       }
-    };
+      
+      localStreamRef.current = stream;
+      setLocalStream(stream);
 
-    if (isHost || live.participants?.some(p => p.uid === auth.currentUser?.uid)) {
-      initMedia();
+      // Update tracks in existing peer connections
+      Object.values(peerConnections.current).forEach((pc) => {
+        const peer = pc as RTCPeerConnection;
+        const senders = peer.getSenders();
+        stream.getTracks().forEach(track => {
+          const sender = senders.find(s => s.track?.kind === track.kind);
+          if (sender) sender.replaceTrack(track);
+        });
+      });
+    } catch (err) {
+      console.error("Error accessing media devices:", err);
     }
+  }, [videoQuality, live.type, peerConnections]);
 
+  useEffect(() => {
+    // We no longer auto-init media to avoid immediate permission errors.
+    // Users (host or participants) must click a button to start their camera/mic.
+    
     return () => {
-      localStream?.getTracks().forEach(track => track.stop());
+      localStreamRef.current?.getTracks().forEach(track => track.stop());
     };
-  }, [isHost, live.type, videoQuality]);
+  }, []);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -273,25 +448,60 @@ export const LiveStreamScreen: React.FC<LiveStreamScreenProps> = ({ live: initia
     setInputText('');
   };
 
-  const sendGift = async () => {
+  const sendGift = async (amountArg: any = 100) => {
     if (!auth.currentUser) return;
-    setShowCoinRain(true);
-    setTimeout(() => setShowCoinRain(false), 3000);
     
-    const messagesRef = collection(db, 'lives', initialLive.id, 'messages');
-    await addDoc(messagesRef, {
-      uid: auth.currentUser.uid,
-      username: auth.currentUser.displayName || 'Usuário',
-      text: 'enviou 100 moedas! ◈',
-      type: 'gift',
-      giftValue: 100,
-      createdAt: serverTimestamp()
-    });
+    // Ensure amount is a number and not a React event
+    const amount = typeof amountArg === 'number' ? amountArg : 100;
+    
+    try {
+      const senderRef = doc(db, 'users', auth.currentUser.uid);
+      const senderSnap = await getDoc(senderRef);
+      
+      if (!senderSnap.exists()) return;
+      const senderData = senderSnap.data() as UserProfile;
+      
+      if ((senderData.coins || 0) < amount) {
+        alert("Moedas insuficientes!");
+        return;
+      }
 
-    const liveRef = doc(db, 'lives', initialLive.id);
-    await updateDoc(liveRef, {
-      coinCount: (live.coinCount || 0) + 100
-    });
+      setShowCoinRain(true);
+      setTimeout(() => setShowCoinRain(false), 3000);
+      
+      // Deduct from sender
+      await updateDoc(senderRef, {
+        coins: increment(-amount)
+      });
+
+      // Add 70% to host
+      const hostRef = doc(db, 'users', live.creatorId);
+      const hostAmount = Math.floor(amount * 0.7);
+      await updateDoc(hostRef, {
+        coins: increment(hostAmount)
+      });
+
+      // Log message
+      const messagesRef = collection(db, 'lives', initialLive.id, 'messages');
+      await addDoc(messagesRef, {
+        uid: auth.currentUser.uid,
+        username: auth.currentUser.displayName || 'Usuário',
+        text: `enviou ${amount} moedas! ◈`,
+        type: 'gift',
+        giftValue: amount,
+        createdAt: serverTimestamp()
+      });
+
+      // Update live coin count
+      const liveRef = doc(db, 'lives', initialLive.id);
+      await updateDoc(liveRef, {
+        coinCount: increment(amount)
+      });
+
+    } catch (error) {
+      console.error("Error sending gift:", error);
+      alert("Erro ao enviar presente.");
+    }
   };
 
   const addReaction = (emoji: string) => {
@@ -388,7 +598,7 @@ export const LiveStreamScreen: React.FC<LiveStreamScreenProps> = ({ live: initia
   };
 
   const blockUser = async (uid: string) => {
-    if (!isHost) return;
+    if (!isHost && !isModerator) return;
     const liveRef = doc(db, 'lives', initialLive.id);
     await updateDoc(liveRef, {
       blockedUids: arrayUnion(uid)
@@ -407,10 +617,35 @@ export const LiveStreamScreen: React.FC<LiveStreamScreenProps> = ({ live: initia
     await addDoc(messagesRef, {
       uid: 'system',
       username: 'Sistema',
-      text: `Um usuário foi bloqueado da transmissão.`,
+      text: `Um usuário foi bloqueado da transmissão por um ${isHost ? 'host' : 'moderador'}.`,
       type: 'system',
       createdAt: serverTimestamp()
     });
+  };
+
+  const toggleModerator = async (uid: string) => {
+    if (!isHost) return;
+    const liveRef = doc(db, 'lives', initialLive.id);
+    const isCurrentlyMod = live.moderatorUids?.includes(uid);
+    
+    await updateDoc(liveRef, {
+      moderatorUids: isCurrentlyMod ? arrayRemove(uid) : arrayUnion(uid)
+    });
+
+    const messagesRef = collection(db, 'lives', initialLive.id, 'messages');
+    await addDoc(messagesRef, {
+      uid: 'system',
+      username: 'Sistema',
+      text: `${isCurrentlyMod ? 'Removido' : 'Adicionado'} cargo de moderador para um usuário.`,
+      type: 'system',
+      createdAt: serverTimestamp()
+    });
+  };
+
+  const deleteMessage = async (messageId: string) => {
+    if (!isHost && !isModerator) return;
+    const messageRef = doc(db, 'lives', initialLive.id, 'messages', messageId);
+    await deleteDoc(messageRef);
   };
 
   const copyLiveLink = () => {
@@ -497,8 +732,8 @@ export const LiveStreamScreen: React.FC<LiveStreamScreenProps> = ({ live: initia
 
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 bg-black/40 backdrop-blur-md px-3 py-1 rounded-full border border-white/10">
-            <Users size={12} className="text-white/60" />
-            <span className="text-[10px] font-bold">6</span>
+            <Coins size={12} className="text-vortex-gold" />
+            <span className="text-[10px] font-bold">{live.coinCount || 0}</span>
           </div>
           <button onClick={onClose} className="p-2 glass rounded-full text-white/80 hover:text-white transition-colors">
             <Power size={18} />
@@ -508,6 +743,94 @@ export const LiveStreamScreen: React.FC<LiveStreamScreenProps> = ({ live: initia
 
       {/* Main Content Area - Split Layout */}
       <div className="relative z-10 flex flex-col min-h-0 flex-1 mt-2">
+        {hasPaid === false && !isHost && (
+          <div className="absolute inset-0 z-[150] bg-vortex-bg/95 backdrop-blur-xl flex flex-col items-center justify-center p-8 text-center">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className="max-w-xs space-y-6"
+            >
+              <div className="w-20 h-20 bg-vortex-gold/20 rounded-full flex items-center justify-center mx-auto text-vortex-gold border border-vortex-gold/30">
+                <Lock size={40} />
+              </div>
+              <div>
+                <h2 className="text-2xl font-display font-bold">Transmissão Privada</h2>
+                <p className="text-sm text-white/60 mt-2">Esta live exige uma taxa de entrada para visualização.</p>
+              </div>
+              
+              <div className="bg-white/5 rounded-3xl p-6 border border-white/10">
+                <p className="text-[10px] uppercase tracking-widest text-white/40 font-bold mb-2">Taxa de Entrada</p>
+                <div className="flex items-center justify-center gap-2 text-3xl font-bold text-vortex-gold">
+                  <Coins size={28} />
+                  {globalSettings?.liveEntryFee || 0}
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-3">
+                <button 
+                  onClick={handlePayment}
+                  disabled={isPaying}
+                  className="w-full py-4 bg-vortex-accent text-white rounded-2xl font-bold shadow-lg shadow-vortex-accent/20 flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {isPaying ? <Loader2 className="animate-spin" size={20} /> : <Unlock size={20} />}
+                  {isPaying ? 'Processando...' : 'Pagar e Entrar'}
+                </button>
+                <button 
+                  onClick={onClose}
+                  className="w-full py-4 text-sm font-bold text-white/40 hover:text-white transition-colors"
+                >
+                  Voltar
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {permissionError && (isHost || live.participants?.some(p => p.uid === auth.currentUser?.uid)) && (
+          <div className="absolute inset-x-4 top-0 z-50 glass bg-red-500/10 border-red-500/20 p-4 rounded-2xl flex flex-col items-center gap-3 text-center">
+            <AlertTriangle className="text-red-400" size={24} />
+            <p className="text-xs font-bold text-red-400">{permissionError}</p>
+            {showPermissionGuide ? (
+              <div className="bg-black/60 p-4 rounded-xl border border-white/10 space-y-3 max-w-xs">
+                <div className="text-left space-y-2">
+                  <p className="text-[10px] text-white/80 leading-relaxed">
+                    <span className="text-vortex-accent font-bold block mb-1 underline">Como resolver:</span>
+                    1. Clique no ícone de <span className="text-vortex-accent font-bold">Cadeado 🔒</span> na barra de endereços.<br/>
+                    2. Ative <span className="text-white font-bold">Câmera</span> e <span className="text-white font-bold">Microfone</span>.<br/>
+                    3. Se não funcionar, clique em <span className="text-white font-bold">"Configurações do site"</span> e limpe as permissões.
+                  </p>
+                  <p className="text-[9px] text-white/40 italic">
+                    Dica: Tente abrir o app em uma <span className="text-vortex-secondary">nova aba</span> se o erro persistir.
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => window.location.reload()}
+                    className="flex-1 py-2 bg-white/10 text-white rounded-full text-[10px] font-bold uppercase tracking-widest hover:bg-white/20 transition-colors"
+                  >
+                    Recarregar
+                  </button>
+                  <button 
+                    onClick={initMedia}
+                    className="flex-1 py-2 bg-vortex-accent text-white rounded-full text-[10px] font-bold uppercase tracking-widest hover:bg-vortex-accent/80 transition-colors shadow-lg shadow-vortex-accent/20"
+                  >
+                    Tentar Novamente
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                <button 
+                  onClick={initMedia}
+                  className="px-6 py-2 bg-vortex-accent text-white rounded-full text-[10px] font-bold uppercase tracking-widest shadow-lg shadow-vortex-accent/20"
+                >
+                  Tentar Novamente
+                </button>
+                <p className="text-[9px] text-white/40">Certifique-se de que nenhum outro app está usando sua câmera/mic.</p>
+              </div>
+            )}
+          </div>
+        )}
         <div className="flex px-2 gap-1 h-[320px] shrink-0">
           {/* Left Side - Host */}
           <div className={cn(
@@ -518,6 +841,18 @@ export const LiveStreamScreen: React.FC<LiveStreamScreenProps> = ({ live: initia
               <div className="w-full h-full relative">
                 {isHost && localStream ? (
                   <VideoStream stream={localStream} muted filter={videoFilter} className="w-full h-full object-cover" />
+                ) : isHost && !localStream && !permissionError ? (
+                  <div className="w-full h-full flex flex-col items-center justify-center bg-vortex-surface p-6 text-center">
+                    <Camera size={48} className="text-vortex-accent mb-4 animate-pulse" />
+                    <h4 className="text-sm font-bold mb-2">Pronto para começar?</h4>
+                    <p className="text-[10px] text-white/60 mb-6">Ative sua câmera e microfone para iniciar a transmissão.</p>
+                    <button 
+                      onClick={initMedia}
+                      className="px-8 py-3 bg-vortex-accent text-white rounded-full text-xs font-bold uppercase tracking-widest shadow-[0_0_20px_rgba(124,58,237,0.4)]"
+                    >
+                      Ativar Câmera
+                    </button>
+                  </div>
                 ) : remoteStreams['host'] ? (
                   <VideoStream stream={remoteStreams['host']} className="w-full h-full object-cover" />
                 ) : (
@@ -575,12 +910,30 @@ export const LiveStreamScreen: React.FC<LiveStreamScreenProps> = ({ live: initia
                           <VideoStream stream={remoteStreams[slot.participant.uid]} className="w-full h-full object-cover" />
                         ) : slot.participant.uid === auth.currentUser?.uid && localStream ? (
                           <VideoStream stream={localStream} muted filter={videoFilter} className="w-full h-full object-cover" />
+                        ) : slot.participant.uid === auth.currentUser?.uid && !localStream ? (
+                          <div className="w-full h-full flex flex-col items-center justify-center bg-vortex-surface p-2 text-center">
+                            <button 
+                              onClick={initMedia}
+                              className="p-2 bg-vortex-accent text-white rounded-full hover:scale-110 transition-transform shadow-lg"
+                            >
+                              <Video size={16} />
+                            </button>
+                            <span className="text-[8px] font-bold mt-1 uppercase tracking-widest">Entrar</span>
+                          </div>
                         ) : (
                           <img src={slot.participant.photoURL} alt={slot.participant.username} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                         )
                       ) : (
                         <div className="w-full h-full flex flex-col items-center justify-center bg-vortex-surface p-1">
                           <img src={slot.participant.photoURL} alt={slot.participant.username} className="w-8 h-8 rounded-full object-cover border border-white/10" referrerPolicy="no-referrer" />
+                          {slot.participant.uid === auth.currentUser?.uid && !localStream && (
+                            <button 
+                              onClick={initMedia}
+                              className="mt-1 p-1 bg-vortex-secondary text-white rounded-full hover:scale-110 transition-transform"
+                            >
+                              <Mic size={10} />
+                            </button>
+                          )}
                         </div>
                       )}
                       <div className="absolute bottom-1 left-1 text-[8px] font-bold truncate w-[90%] drop-shadow-md">{slot.participant.username}</div>
@@ -638,30 +991,47 @@ export const LiveStreamScreen: React.FC<LiveStreamScreenProps> = ({ live: initia
                 key={msg.id}
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
-                className="flex items-start gap-2"
+                className="group flex items-start gap-2 relative"
               >
                 <button 
                   onClick={() => {
-                    if (isHost && msg.uid !== 'system' && msg.uid !== auth.currentUser?.uid) {
+                    if ((isHost || isModerator) && msg.uid !== 'system' && msg.uid !== auth.currentUser?.uid) {
                       setSelectedUserUid(msg.uid);
                     }
                   }}
                   className={cn(
                     "w-5 h-5 rounded-full overflow-hidden shrink-0 mt-0.5",
-                    isHost && msg.uid !== 'system' && msg.uid !== auth.currentUser?.uid && "cursor-pointer ring-1 ring-vortex-accent/30"
+                    (isHost || isModerator) && msg.uid !== 'system' && msg.uid !== auth.currentUser?.uid && "cursor-pointer ring-1 ring-vortex-accent/30"
                   )}
                 >
                   <img src={`https://picsum.photos/seed/${msg.uid}/40/40`} alt="user" referrerPolicy="no-referrer" />
                 </button>
                 <div className={cn(
-                  "text-[10px] leading-tight px-2 py-1 rounded-lg",
+                  "text-[10px] leading-tight px-2 py-1 rounded-lg flex flex-col",
                   msg.type === 'system' ? "text-vortex-accent font-bold" : 
                   msg.type === 'gift' ? "bg-vortex-gold/20 text-vortex-gold border border-vortex-gold/30" :
                   "bg-black/60 text-white"
                 )}>
-                  <span className="font-bold text-white/60 mr-1">{msg.username}</span>
+                  <div className="flex items-center gap-1">
+                    <span className="font-bold text-white/60">{msg.username}</span>
+                    {live.moderatorUids?.includes(msg.uid) && (
+                      <Shield size={8} className="text-vortex-highlight" />
+                    )}
+                    {live.creatorId === msg.uid && (
+                      <Star size={8} className="text-vortex-gold" fill="currentColor" />
+                    )}
+                  </div>
                   {msg.text}
                 </div>
+                {(isHost || isModerator) && msg.type !== 'system' && (
+                  <button 
+                    onClick={() => deleteMessage(msg.id)}
+                    className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-500/20 rounded text-red-400 transition-all ml-1"
+                    title="Excluir mensagem"
+                  >
+                    <Trash2 size={10} />
+                  </button>
+                )}
               </motion.div>
             ))}
             <div ref={chatEndRef} />
@@ -693,7 +1063,7 @@ export const LiveStreamScreen: React.FC<LiveStreamScreenProps> = ({ live: initia
             <Heart size={18} fill="currentColor" />
           </button>
           <button 
-            onClick={sendGift}
+            onClick={() => sendGift(100)}
             className="p-2.5 bg-vortex-gold rounded-full text-white shadow-lg"
           >
             <Coins size={18} />
@@ -811,26 +1181,60 @@ export const LiveStreamScreen: React.FC<LiveStreamScreenProps> = ({ live: initia
                 const userUid = selectedUserUid || participant?.uid;
                 const username = participant?.username || messages.find(m => m.uid === userUid)?.username || 'Usuário';
                 const photoURL = participant?.photoURL || `https://picsum.photos/seed/${userUid}/100/100`;
+                const isUserMod = live.moderatorUids?.includes(userUid || '');
 
                 return (
                   <>
                     <div className="flex flex-col items-center gap-3">
-                      <div className="w-20 h-20 rounded-full border-4 border-vortex-accent p-1">
+                      <div className="w-20 h-20 rounded-full border-4 border-vortex-accent p-1 relative">
                         <img 
                           src={photoURL} 
                           alt="user" 
                           className="w-full h-full rounded-full object-cover" 
                           referrerPolicy="no-referrer" 
                         />
+                        {isUserMod && (
+                          <div className="absolute -top-1 -right-1 bg-vortex-highlight p-1.5 rounded-full border-2 border-vortex-surface shadow-lg">
+                            <Shield size={12} className="text-white" />
+                          </div>
+                        )}
                       </div>
                       <div className="text-center">
                         <h3 className="font-display font-bold text-lg">@{username}</h3>
-                        <p className="text-[10px] text-white/40 uppercase tracking-widest">Gerenciar Usuário</p>
+                        <p className="text-[10px] text-white/40 uppercase tracking-widest">
+                          {isUserMod ? 'Moderador da Live' : 'Gerenciar Usuário'}
+                        </p>
                       </div>
                     </div>
 
                     <div className="w-full grid grid-cols-1 gap-2">
-                      {participant && (
+                      {isHost && userUid !== auth.currentUser?.uid && (
+                        <button 
+                          onClick={() => {
+                            if (userUid) toggleModerator(userUid);
+                            setSelectedParticipantIndex(null);
+                            setSelectedUserUid(null);
+                          }}
+                          className={cn(
+                            "w-full py-3 px-4 rounded-2xl flex items-center gap-3 transition-all border",
+                            isUserMod 
+                              ? "bg-vortex-highlight/10 border-vortex-highlight/20 text-vortex-highlight" 
+                              : "bg-white/5 border-white/5 text-white/80 hover:bg-white/10"
+                          )}
+                        >
+                          <div className={cn(
+                            "p-2 rounded-lg",
+                            isUserMod ? "bg-vortex-highlight/20" : "bg-white/10"
+                          )}>
+                            <Shield size={18} />
+                          </div>
+                          <span className="text-sm font-bold">
+                            {isUserMod ? 'Remover Moderador' : 'Tornar Moderador'}
+                          </span>
+                        </button>
+                      )}
+
+                      {participant && (isHost || isModerator) && (
                         <button 
                           onClick={() => {
                             toggleMuteParticipant(selectedParticipantIndex!);
@@ -853,7 +1257,7 @@ export const LiveStreamScreen: React.FC<LiveStreamScreenProps> = ({ live: initia
                         </button>
                       )}
 
-                      {(participant || selectedUserUid) && (
+                      {(participant || selectedUserUid) && (isHost || isModerator) && userUid !== live.creatorId && (
                         <button 
                           onClick={() => {
                             if (participant) {
@@ -874,19 +1278,21 @@ export const LiveStreamScreen: React.FC<LiveStreamScreenProps> = ({ live: initia
                         </button>
                       )}
 
-                      <button 
-                        onClick={() => {
-                          if (userUid) blockUser(userUid);
-                          setSelectedParticipantIndex(null);
-                          setSelectedUserUid(null);
-                        }}
-                        className="w-full py-3 px-4 bg-red-900/20 hover:bg-red-900/30 rounded-2xl flex items-center gap-3 transition-all border border-red-900/20"
-                      >
-                        <div className="p-2 bg-red-900/40 rounded-lg">
-                          <Shield size={18} className="text-red-500" />
-                        </div>
-                        <span className="text-sm font-bold text-red-500">Bloquear Usuário</span>
-                      </button>
+                      {(isHost || isModerator) && userUid !== live.creatorId && (
+                        <button 
+                          onClick={() => {
+                            if (userUid) blockUser(userUid);
+                            setSelectedParticipantIndex(null);
+                            setSelectedUserUid(null);
+                          }}
+                          className="w-full py-3 px-4 bg-red-900/20 hover:bg-red-900/30 rounded-2xl flex items-center gap-3 transition-all border border-red-900/20"
+                        >
+                          <div className="p-2 bg-red-900/40 rounded-lg">
+                            <Shield size={18} className="text-red-500" />
+                          </div>
+                          <span className="text-sm font-bold text-red-500">Bloquear Usuário</span>
+                        </button>
+                      )}
                     </div>
                   </>
                 );
@@ -948,6 +1354,49 @@ export const LiveStreamScreen: React.FC<LiveStreamScreenProps> = ({ live: initia
                     <span className="text-[10px] font-bold text-white/60">{platform.name}</span>
                   </button>
                 ))}
+              </div>
+
+              {/* Share with Friends Section */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-[10px] font-bold uppercase tracking-widest text-white/40">Amigos na Plataforma</h4>
+                  <span className="text-[10px] text-vortex-accent font-mono">{friends.length} online</span>
+                </div>
+                <div className="flex gap-4 overflow-x-auto no-scrollbar pb-2">
+                  {friends.length === 0 ? (
+                    <div className="w-full py-4 text-center text-[10px] text-white/20 italic">
+                      Nenhum amigo encontrado...
+                    </div>
+                  ) : (
+                    friends.map((friend) => (
+                      <button 
+                        key={friend.uid}
+                        onClick={() => shareWithFriend(friend)}
+                        className="flex flex-col items-center gap-2 shrink-0 group"
+                      >
+                        <div className="relative">
+                          <img 
+                            src={friend.photoURL} 
+                            alt={friend.displayName} 
+                            className={cn(
+                              "w-12 h-12 rounded-full object-cover border-2 transition-all",
+                              sharedWith.includes(friend.uid) ? "border-green-500 opacity-50" : "border-white/10 group-hover:border-vortex-accent"
+                            )}
+                            referrerPolicy="no-referrer"
+                          />
+                          {sharedWith.includes(friend.uid) && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/40 rounded-full">
+                              <Check size={20} className="text-green-500" />
+                            </div>
+                          )}
+                        </div>
+                        <span className="text-[9px] font-bold text-white/60 truncate w-12 text-center">
+                          {friend.displayName.split(' ')[0]}
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
               </div>
 
               <div className="pt-4 border-t border-white/10">

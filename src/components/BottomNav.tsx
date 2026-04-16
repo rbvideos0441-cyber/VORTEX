@@ -1,5 +1,5 @@
 import React from 'react';
-import { Home, Search, Plus, MessageSquare, User, Shield } from 'lucide-react';
+import { Home, Search, Plus, MessageSquare, User, Shield, Coins } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 interface BottomNavProps {
@@ -12,6 +12,7 @@ export const BottomNav: React.FC<BottomNavProps> = ({ activeTab, setActiveTab, i
   const tabs = [
     { id: 'home', icon: Home, label: 'Início' },
     { id: 'discover', icon: Search, label: 'Descobrir' },
+    { id: 'shop', icon: Coins, label: 'Loja' },
     { id: 'create', icon: Plus, label: 'Criar', isSpecial: true },
     { id: 'inbox', icon: MessageSquare, label: 'Entrada' },
     { id: 'profile', icon: User, label: 'Perfil' },

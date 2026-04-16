@@ -22,7 +22,119 @@ export const CreateVideoFlow: React.FC<CreateVideoFlowProps> = ({ onClose, onPub
   const [showFilters, setShowFilters] = useState(false);
   const [activeSpeed, setActiveSpeed] = useState(1);
   const [isBeautyOn, setIsBeautyOn] = useState(false);
+  const [stream, setStream] = useState<MediaStream | null>(null);
+  const [permissionError, setPermissionError] = useState<string | null>(null);
+  const [showPermissionGuide, setShowPermissionGuide] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
   const galleryInputRef = useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    if (step === 'record') {
+      initCamera();
+    }
+    return () => {
+      stream?.getTracks().forEach(track => track.stop());
+    };
+  }, [step]);
+
+  const initCamera = async () => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      setPermissionError("Seu navegador não suporta acesso à câmera ou microfone.");
+      return;
+    }
+    try {
+      const getStream = async (withVideo: boolean) => {
+        return await navigator.mediaDevices.getUserMedia({
+          video: withVideo ? {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            facingMode: 'user'
+          } : false,
+          audio: true
+        });
+      };
+
+      let mediaStream: MediaStream;
+      try {
+        mediaStream = await getStream(true);
+        setPermissionError(null);
+        setShowPermissionGuide(false);
+      } catch (videoErr: any) {
+        console.warn("Combined media access failed in CreateVideoFlow, trying fallback:", videoErr);
+        const isNotFoundError = videoErr.name === 'NotFoundError' || videoErr.name === 'DevicesNotFoundError';
+        const isPermissionError = videoErr.name === 'NotAllowedError' || videoErr.name === 'PermissionDeniedError' || videoErr.message?.includes('denied');
+        
+        if (isPermissionError) {
+          setShowPermissionGuide(true);
+          setPermissionError("Acesso à câmera ou microfone negado. Tentando apenas áudio...");
+        } else if (isNotFoundError) {
+          console.log("Camera not found in CreateVideoFlow, falling back to audio.");
+        }
+
+        try {
+          mediaStream = await getStream(false);
+          setPermissionError(null);
+          setShowPermissionGuide(false);
+          
+          if (isNotFoundError) {
+            setPermissionError("Câmera não detectada. Você pode gravar apenas o áudio.");
+            setTimeout(() => setPermissionError(null), 5000);
+          }
+        } catch (audioErr: any) {
+          console.error("Error accessing audio device in CreateVideoFlow:", audioErr);
+          const isAudioPermissionError = audioErr.name === 'NotAllowedError' || audioErr.name === 'PermissionDeniedError' || audioErr.message?.includes('denied');
+          const isAudioNotFoundError = audioErr.name === 'NotFoundError' || audioErr.name === 'DevicesNotFoundError';
+
+          if (isAudioPermissionError) {
+            setShowPermissionGuide(true);
+            setPermissionError("O acesso ao microfone foi negado. Você precisa autorizar nas configurações do navegador.");
+          } else if (isAudioNotFoundError) {
+            setPermissionError("Câmera ou microfone não encontrado. Verifique se estão conectados.");
+          } else {
+            setPermissionError(`Erro de mídia: ${audioErr.message || 'Erro desconhecido'}`);
+          }
+          return;
+        }
+      }
+
+      setStream(mediaStream);
+      if (videoRef.current) {
+        videoRef.current.srcObject = mediaStream;
+      }
+    } catch (err: any) {
+      console.error("Fatal error accessing media:", err);
+    }
+  };
+
+  const startRecording = () => {
+    if (!stream) return;
+    setIsRecording(true);
+    chunksRef.current = [];
+    const mediaRecorder = new MediaRecorder(stream);
+    mediaRecorderRef.current = mediaRecorder;
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) {
+        chunksRef.current.push(e.data);
+      }
+    };
+
+    mediaRecorder.onstop = () => {
+      const blob = new Blob(chunksRef.current, { type: 'video/mp4' });
+      const url = URL.createObjectURL(blob);
+      setVideoFile(url);
+      setStep('edit');
+    };
+
+    mediaRecorder.start();
+  };
+
+  const stopRecording = () => {
+    setIsRecording(false);
+    mediaRecorderRef.current?.stop();
+  };
 
   const handleGalleryUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -49,8 +161,62 @@ export const CreateVideoFlow: React.FC<CreateVideoFlowProps> = ({ onClose, onPub
           >
             {/* Camera View Placeholder */}
             <div className="absolute inset-0 bg-vortex-surface flex items-center justify-center">
-              <Camera size={80} className="text-white/10" />
-              <div className="absolute inset-0 bg-linear-to-b from-black/40 via-transparent to-black/60" />
+              {stream ? (
+                <video 
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="w-full h-full object-cover"
+                  style={{ filter: activeFilter !== 'none' ? `saturate(${activeFilter === 'warm' ? 1.5 : 1})` : '' }}
+                />
+              ) : (
+                <div className="flex flex-col items-center gap-4">
+                  <Camera size={80} className="text-white/10" />
+                  {permissionError && (
+                    <div className="px-6 text-center max-w-xs">
+                      <p className="text-red-400 text-sm font-bold mb-4">{permissionError}</p>
+                      {showPermissionGuide ? (
+                        <div className="bg-black/60 p-4 rounded-2xl border border-white/10 space-y-3">
+                          <div className="text-left space-y-2">
+                            <p className="text-[10px] text-white/80 leading-relaxed">
+                              <span className="text-vortex-accent font-bold block mb-1 underline">Como resolver:</span>
+                              1. Clique no ícone de <span className="text-vortex-accent font-bold">Cadeado 🔒</span> na barra de endereços.<br/>
+                              2. Ative <span className="text-white font-bold">Câmera</span> e <span className="text-white font-bold">Microfone</span>.<br/>
+                              3. Se não funcionar, clique em <span className="text-white font-bold">"Configurações do site"</span> e limpe as permissões.
+                            </p>
+                            <p className="text-[9px] text-white/40 italic">
+                              Dica: Tente abrir o app em uma <span className="text-vortex-secondary">nova aba</span> se o erro persistir.
+                            </p>
+                          </div>
+                          <div className="flex gap-2">
+                            <button 
+                              onClick={() => window.location.reload()}
+                              className="flex-1 py-2.5 bg-white/10 text-white rounded-full text-[10px] font-bold uppercase tracking-widest hover:bg-white/20 transition-colors"
+                            >
+                              Recarregar
+                            </button>
+                            <button 
+                              onClick={initCamera}
+                              className="flex-1 py-2.5 bg-vortex-accent text-white rounded-full text-[10px] font-bold uppercase tracking-widest hover:bg-vortex-accent/80 transition-colors shadow-lg shadow-vortex-accent/20"
+                            >
+                              Tentar
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button 
+                          onClick={initCamera}
+                          className="px-8 py-3 bg-vortex-accent text-white rounded-full text-xs font-bold uppercase tracking-widest shadow-lg shadow-vortex-accent/20"
+                        >
+                          Tentar Novamente
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+              <div className="absolute inset-0 bg-linear-to-b from-black/40 via-transparent to-black/60 pointer-events-none" />
             </div>
 
             {/* Top Controls */}
@@ -145,7 +311,7 @@ export const CreateVideoFlow: React.FC<CreateVideoFlowProps> = ({ onClose, onPub
               </button>
 
               <button 
-                onClick={() => setIsRecording(!isRecording)}
+                onClick={() => isRecording ? stopRecording() : startRecording()}
                 className="relative flex items-center justify-center"
               >
                 <div className="w-20 h-20 rounded-full border-4 border-white/30 flex items-center justify-center">

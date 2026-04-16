@@ -59,6 +59,7 @@ import { auth, getUserProfile, db } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { Loader2, Mic, Video as VideoIcon } from 'lucide-react';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { cn } from './lib/utils';
 
 const MOCK_VIDEOS: Video[] = [
   {
@@ -112,13 +113,12 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'home' | 'discover' | 'inbox' | 'profile' | 'admin'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'discover' | 'shop' | 'inbox' | 'profile' | 'admin'>('home');
   const [activeFeed, setActiveFeed] = useState<'following' | 'foryou' | 'trending' | 'nearby'>('foryou');
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [isCreatingVideo, setIsCreatingVideo] = useState(false);
   const [activeLive, setActiveLive] = useState<LiveStream | null>(null);
   const [showLiveSelection, setShowLiveSelection] = useState(false);
-  const [showCoinShop, setShowCoinShop] = useState(false);
   const [videos, setVideos] = useState<Video[]>(MOCK_VIDEOS);
 
   useEffect(() => {
@@ -145,6 +145,11 @@ export default function App() {
 
   const startLive = async (type: 'video' | 'audio') => {
     if (!user || !profile) return;
+    
+    if (!profile.isHost && user.email !== 'rbvideos0441@gmail.com') {
+      alert("Apenas hosts oficiais podem iniciar transmissões ao vivo.");
+      return;
+    }
     
     const liveId = `live_${user.uid}`;
     const liveData: LiveStream = {
@@ -228,7 +233,7 @@ export default function App() {
           <ProfileScreen 
             profile={profile} 
             onEdit={() => setIsEditingProfile(true)} 
-            onOpenShop={() => setShowCoinShop(true)}
+            onOpenShop={() => setActiveTab('shop')}
           />
         )}
 
@@ -247,6 +252,13 @@ export default function App() {
 
         {activeTab === 'admin' && (
           <AdminPanel />
+        )}
+
+        {activeTab === 'shop' && profile && (
+          <CoinShop 
+            currentCoins={profile.coins} 
+            onClose={() => setActiveTab('home')} 
+          />
         )}
       </main>
 
@@ -316,13 +328,21 @@ export default function App() {
             >
               <div className="text-center">
                 <h2 className="text-2xl font-display font-bold mb-2">Iniciar Transmissão</h2>
-                <p className="text-sm text-white/50">Escolha o formato da sua live</p>
+                {(!profile?.isHost && user?.email !== 'rbvideos0441@gmail.com') ? (
+                  <p className="text-sm text-red-400 font-bold">Apenas hosts oficiais podem iniciar transmissões.</p>
+                ) : (
+                  <p className="text-sm text-white/50">Escolha o formato da sua live</p>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <button 
                   onClick={() => startLive('video')}
-                  className="flex flex-col items-center gap-4 p-6 rounded-2xl bg-white/5 hover:bg-vortex-accent/20 border border-white/10 hover:border-vortex-accent transition-all group"
+                  disabled={!profile?.isHost && user?.email !== 'rbvideos0441@gmail.com'}
+                  className={cn(
+                    "flex flex-col items-center gap-4 p-6 rounded-2xl bg-white/5 border border-white/10 transition-all group",
+                    (!profile?.isHost && user?.email !== 'rbvideos0441@gmail.com') ? "opacity-50 cursor-not-allowed" : "hover:bg-vortex-accent/20 hover:border-vortex-accent"
+                  )}
                 >
                   <div className="p-4 bg-vortex-accent rounded-full group-hover:scale-110 transition-transform shadow-[0_0_20px_rgba(124,58,237,0.4)]">
                     <VideoIcon size={32} className="text-white" />
@@ -332,7 +352,11 @@ export default function App() {
 
                 <button 
                   onClick={() => startLive('audio')}
-                  className="flex flex-col items-center gap-4 p-6 rounded-2xl bg-white/5 hover:bg-vortex-secondary/20 border border-white/10 hover:border-vortex-secondary transition-all group"
+                  disabled={!profile?.isHost && user?.email !== 'rbvideos0441@gmail.com'}
+                  className={cn(
+                    "flex flex-col items-center gap-4 p-6 rounded-2xl bg-white/5 border border-white/10 transition-all group",
+                    (!profile?.isHost && user?.email !== 'rbvideos0441@gmail.com') ? "opacity-50 cursor-not-allowed" : "hover:bg-vortex-secondary/20 hover:border-vortex-secondary"
+                  )}
                 >
                   <div className="p-4 bg-vortex-secondary rounded-full group-hover:scale-110 transition-transform shadow-[0_0_20px_rgba(236,72,153,0.4)]">
                     <Mic size={32} className="text-white" />
@@ -349,16 +373,6 @@ export default function App() {
               </button>
             </motion.div>
           </div>
-        )}
-      </AnimatePresence>
-
-      {/* Coin Shop Modal */}
-      <AnimatePresence>
-        {showCoinShop && profile && (
-          <CoinShop 
-            currentCoins={profile.coins} 
-            onClose={() => setShowCoinShop(false)} 
-          />
         )}
       </AnimatePresence>
 

@@ -1,23 +1,45 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { X, Coins, Zap, Star, Trophy, CreditCard } from 'lucide-react';
+import { X, Coins, Zap, Star, Trophy, CreditCard, Loader2 } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { CoinPackage } from '../types';
+import { db } from '../firebase';
+import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 
 interface CoinShopProps {
   onClose: () => void;
   currentCoins: number;
 }
 
-const COIN_PACKAGES = [
-  { id: '1', coins: 100, price: 'R$ 4,90', bonus: 0, popular: false },
-  { id: '2', coins: 500, price: 'R$ 19,90', bonus: 50, popular: true },
-  { id: '3', coins: 1200, price: 'R$ 44,90', bonus: 150, popular: false },
-  { id: '4', coins: 3000, price: 'R$ 99,90', bonus: 500, popular: false },
-  { id: '5', coins: 7000, price: 'R$ 199,90', bonus: 1200, popular: false },
-  { id: '6', coins: 15000, price: 'R$ 399,90', bonus: 3000, popular: false },
-];
-
 export const CoinShop: React.FC<CoinShopProps> = ({ onClose, currentCoins }) => {
+  const [packages, setPackages] = useState<CoinPackage[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchPackages = async () => {
+      try {
+        const q = query(collection(db, 'coin_packages'));
+        const snap = await getDocs(q);
+        if (snap.empty) {
+          // Fallback to defaults if DB is empty
+          setPackages([
+            { id: '1', coins: 100, price: 'R$ 4,90', bonus: 0, popular: false },
+            { id: '2', coins: 500, price: 'R$ 19,90', bonus: 50, popular: true },
+            { id: '3', coins: 1200, price: 'R$ 44,90', bonus: 150, popular: false },
+          ]);
+        } else {
+          setPackages(snap.docs.map(d => d.data() as CoinPackage));
+        }
+      } catch (error) {
+        console.error("Error fetching coin packages:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchPackages();
+  }, []);
+
   return (
     <div className="fixed inset-0 z-[150] flex items-end sm:items-center justify-center">
       <motion.div 
@@ -42,7 +64,7 @@ export const CoinShop: React.FC<CoinShopProps> = ({ onClose, currentCoins }) => 
             </div>
             <div>
               <h2 className="text-xl font-display font-bold">Loja de Moedas</h2>
-              <p className="text-xs text-vortex-text-secondary">Saldo atual: <span className="text-vortex-gold font-bold">{currentCoins}</span></p>
+              <p className="text-xs text-vortex-text-secondary">Saldo atual: <span className="text-vortex-gold font-bold">{currentCoins || 0}</span></p>
             </div>
           </div>
           <button onClick={onClose} className="p-2 hover:bg-white/5 rounded-full transition-colors">
@@ -52,46 +74,53 @@ export const CoinShop: React.FC<CoinShopProps> = ({ onClose, currentCoins }) => 
 
         {/* Content */}
         <div className="p-6 max-h-[70vh] overflow-y-auto no-scrollbar">
-          <div className="grid grid-cols-2 gap-4">
-            {COIN_PACKAGES.map((pkg) => (
-              <button 
-                key={pkg.id}
-                className={cn(
-                  "relative p-4 rounded-2xl border transition-all flex flex-col items-center gap-2 group",
-                  pkg.popular 
-                    ? "bg-vortex-accent/10 border-vortex-accent shadow-[0_0_20px_rgba(124,58,237,0.2)]" 
-                    : "bg-white/5 border-white/10 hover:border-white/20"
-                )}
-              >
-                {pkg.popular && (
-                  <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-vortex-accent text-[8px] font-bold px-3 py-1 rounded-full uppercase tracking-widest">
-                    Mais Popular
-                  </div>
-                )}
-
-                <div className="relative">
-                  <Coins size={32} className={cn(pkg.popular ? "text-vortex-gold" : "text-white/80")} />
-                  {pkg.bonus > 0 && (
-                    <div className="absolute -top-2 -right-4 bg-vortex-secondary text-[8px] font-bold px-1.5 py-0.5 rounded-md">
-                      +{pkg.bonus}
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-12 gap-4">
+              <Loader2 className="text-vortex-accent animate-spin" size={32} />
+              <p className="text-xs font-bold uppercase tracking-widest text-white/40">Carregando Loja...</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-4">
+              {packages.map((pkg) => (
+                <button 
+                  key={pkg.id}
+                  className={cn(
+                    "relative p-4 rounded-2xl border transition-all flex flex-col items-center gap-2 group",
+                    pkg.popular 
+                      ? "bg-vortex-accent/10 border-vortex-accent shadow-[0_0_20px_rgba(124,58,237,0.2)]" 
+                      : "bg-white/5 border-white/10 hover:border-white/20"
+                  )}
+                >
+                  {pkg.popular && (
+                    <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-vortex-accent text-[8px] font-bold px-3 py-1 rounded-full uppercase tracking-widest">
+                      Mais Popular
                     </div>
                   )}
-                </div>
 
-                <div className="text-center">
-                  <p className="text-lg font-mono font-bold">{pkg.coins + pkg.bonus}</p>
-                  <p className="text-[10px] text-white/40 uppercase font-bold">Moedas</p>
-                </div>
+                  <div className="relative">
+                    <Coins size={32} className={cn(pkg.popular ? "text-vortex-gold" : "text-white/80")} />
+                    {pkg.bonus > 0 && (
+                      <div className="absolute -top-2 -right-4 bg-vortex-secondary text-[8px] font-bold px-1.5 py-0.5 rounded-md">
+                        +{pkg.bonus}
+                      </div>
+                    )}
+                  </div>
 
-                <div className={cn(
-                  "w-full mt-2 py-2 rounded-xl text-xs font-bold transition-all",
-                  pkg.popular ? "bg-vortex-accent text-white" : "bg-white/10 text-white/80 group-hover:bg-white/20"
-                )}>
-                  {pkg.price}
-                </div>
-              </button>
-            ))}
-          </div>
+                  <div className="text-center">
+                    <p className="text-lg font-mono font-bold">{pkg.coins + pkg.bonus}</p>
+                    <p className="text-[10px] text-white/40 uppercase font-bold">Moedas</p>
+                  </div>
+
+                  <div className={cn(
+                    "w-full mt-2 py-2 rounded-xl text-xs font-bold transition-all",
+                    pkg.popular ? "bg-vortex-accent text-white" : "bg-white/10 text-white/80 group-hover:bg-white/20"
+                  )}>
+                    {pkg.price}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
 
           {/* Benefits */}
           <div className="mt-8 space-y-4">

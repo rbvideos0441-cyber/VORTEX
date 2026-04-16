@@ -10,8 +10,32 @@ import {
   collection, getDocs, deleteDoc, doc, 
   updateDoc, query, orderBy, limit, where, setDoc
 } from 'firebase/firestore';
-import { UserProfile, Video, LiveStream, CoinPackage, HostRequest } from '../types';
+import { UserProfile, Video, LiveStream, CoinPackage, HostRequest, OperationType } from '../types';
 import { cn } from '../lib/utils';
+import { auth } from '../firebase';
+
+const handleFirestoreError = (error: any, operationType: OperationType, path: string | null) => {
+  const errInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  return errInfo;
+};
 
 export const AdminPanel: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'videos' | 'lives' | 'reports' | 'shop' | 'settings' | 'host_requests'>('overview');
@@ -106,7 +130,7 @@ export const AdminPanel: React.FC = () => {
       await setDoc(doc(db, 'coin_packages', pkg.id), pkg);
       setFeedback({ type: 'success', message: 'Pacote salvo com sucesso!' });
     } catch (error) {
-      console.error("Error saving coin package:", error);
+      handleFirestoreError(error, OperationType.WRITE, `coin_packages/${pkg.id}`);
       setFeedback({ type: 'error', message: 'Erro ao salvar pacote. Verifique permissões.' });
     } finally {
       setSavingId(null);
@@ -135,7 +159,7 @@ export const AdminPanel: React.FC = () => {
           setCoinPackages(coinPackages.filter(p => p.id !== id));
           setFeedback({ type: 'success', message: 'Pacote removido!' });
         } catch (error) {
-          console.error("Error removing coin package:", error);
+          handleFirestoreError(error, OperationType.DELETE, `coin_packages/${id}`);
           setFeedback({ type: 'error', message: 'Erro ao remover pacote.' });
         }
         setConfirmModal(prev => ({ ...prev, isOpen: false }));
@@ -154,7 +178,7 @@ export const AdminPanel: React.FC = () => {
           setUsers(users.filter(u => u.uid !== uid));
           setFeedback({ type: 'success', message: 'Usuário excluído!' });
         } catch (error) {
-          console.error("Error deleting user:", error);
+          handleFirestoreError(error, OperationType.DELETE, `users/${uid}`);
           setFeedback({ type: 'error', message: 'Erro ao excluir usuário.' });
         }
         setConfirmModal(prev => ({ ...prev, isOpen: false }));
@@ -173,7 +197,7 @@ export const AdminPanel: React.FC = () => {
           setVideos(videos.filter(v => v.id !== id));
           setFeedback({ type: 'success', message: 'Vídeo excluído!' });
         } catch (error) {
-          console.error("Error deleting video:", error);
+          handleFirestoreError(error, OperationType.DELETE, `videos/${id}`);
           setFeedback({ type: 'error', message: 'Erro ao excluir vídeo.' });
         }
         setConfirmModal(prev => ({ ...prev, isOpen: false }));
@@ -187,7 +211,7 @@ export const AdminPanel: React.FC = () => {
       await setDoc(doc(db, 'app_settings', 'general'), globalSettings);
       setFeedback({ type: 'success', message: 'Configurações salvas!' });
     } catch (error) {
-      console.error("Error saving settings:", error);
+      handleFirestoreError(error, OperationType.WRITE, 'app_settings/general');
       setFeedback({ type: 'error', message: 'Erro ao salvar configurações.' });
     } finally {
       setSavingId(null);
@@ -208,7 +232,7 @@ export const AdminPanel: React.FC = () => {
       setHostRequests(hostRequests.map(r => r.id === request.id ? { ...r, status } : r));
       setFeedback({ type: 'success', message: `Solicitação ${status === 'approved' ? 'aprovada' : 'recusada'}!` });
     } catch (error) {
-      console.error("Error handling host request:", error);
+      handleFirestoreError(error, OperationType.UPDATE, `host_requests/${request.id}`);
       setFeedback({ type: 'error', message: 'Erro ao processar solicitação.' });
     } finally {
       setSavingId(null);
@@ -216,8 +240,13 @@ export const AdminPanel: React.FC = () => {
   };
 
   const toggleVerification = async (uid: string, currentStatus: boolean) => {
-    await updateDoc(doc(db, 'users', uid), { isVerified: !currentStatus });
-    setUsers(users.map(u => u.uid === uid ? { ...u, isVerified: !currentStatus } : u));
+    try {
+      await updateDoc(doc(db, 'users', uid), { isVerified: !currentStatus });
+      setUsers(users.map(u => u.uid === uid ? { ...u, isVerified: !currentStatus } : u));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${uid}`);
+      setFeedback({ type: 'error', message: 'Erro ao alternar verificação.' });
+    }
   };
 
   return (

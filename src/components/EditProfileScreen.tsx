@@ -61,10 +61,16 @@ export const EditProfileScreen: React.FC<EditProfileScreenProps> = ({ profile, o
       username: formData.username.toLowerCase(),
     };
 
-    await saveUserProfile(updatedProfile);
-    onSave(updatedProfile);
-    setIsSaving(false);
-    onClose();
+    try {
+      await saveUserProfile(updatedProfile);
+      onSave(updatedProfile);
+      setIsSaving(false);
+      onClose();
+    } catch (error) {
+      console.error("Erro ao salvar perfil:", error);
+      alert("Erro ao salvar perfil. Tente novamente.");
+      setIsSaving(false);
+    }
   };
 
   return (

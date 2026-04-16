@@ -69,7 +69,10 @@ service cloud.firestore {
              (!('website' in data) || (data.website is string && data.website.size() <= 100)) &&
              (!('location' in data) || (data.location is string && data.location.size() <= 100)) &&
              (!('pronouns' in data) || (data.pronouns is string && data.pronouns.size() <= 20)) &&
+             (!('photoURL' in data) || (data.photoURL is string)) &&
+             (!('bannerURL' in data) || (data.bannerURL is string)) &&
              (!('followersCount' in data) || data.followersCount is number) &&
+             (!('followingCount' in data) || data.followingCount is number) &&
              (!('coins' in data) || data.coins is number) &&
              (!('isHost' in data) || data.isHost is bool) &&
              (!('role' in data) || data.role in ['admin', 'user']);
@@ -78,9 +81,16 @@ service cloud.firestore {
     function isValidVideo(data) {
       return data.keys().hasAll(['creatorId', 'videoUrl']) &&
              data.creatorId is string && data.creatorId == request.auth.uid &&
-             data.videoUrl is string && data.videoUrl.matches("^https?://.*") &&
+             data.videoUrl is string && (data.videoUrl.matches("^https?://.*") || data.videoUrl.size() > 0) &&
+             (!('creatorName' in data) || data.creatorName is string) &&
+             (!('creatorPhoto' in data) || data.creatorPhoto is string) &&
+             (!('thumbnailUrl' in data) || data.thumbnailUrl is string) &&
+             (!('musicName' in data) || data.musicName is string) &&
              (!('description' in data) || (data.description is string && data.description.size() <= 500)) &&
-             (!('likesCount' in data) || data.likesCount is number);
+             (!('likesCount' in data) || data.likesCount is number) &&
+             (!('commentsCount' in data) || data.commentsCount is number) &&
+             (!('sharesCount' in data) || data.sharesCount is number) &&
+             (!('tags' in data) || data.tags is list);
     }
 
     function isValidCoinPackage(data) {

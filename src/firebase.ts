@@ -1,21 +1,8 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, setPersistence, browserLocalPersistence, onAuthStateChanged as firebaseOnAuthStateChanged } from 'firebase/auth';
 import { getFirestore, doc, getDoc, setDoc, updateDoc, collection, query, where, getDocs } from 'firebase/firestore';
-import firebaseConfigLocal from '../firebase-applet-config.json';
+import firebaseConfig from '../firebase-applet-config.json';
 import { UserProfile } from './types';
-
-// Use environment variables if available (for Vercel/Production), 
-// otherwise fallback to the local config file (for AI Studio/Development)
-const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || firebaseConfigLocal.apiKey,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || firebaseConfigLocal.authDomain,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || firebaseConfigLocal.projectId,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || firebaseConfigLocal.storageBucket,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || firebaseConfigLocal.messagingSenderId,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || firebaseConfigLocal.appId,
-};
-
-const firestoreDatabaseId = import.meta.env.VITE_FIREBASE_DATABASE_ID || firebaseConfigLocal.firestoreDatabaseId || '(default)';
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
@@ -25,7 +12,7 @@ setPersistence(auth, browserLocalPersistence).catch(err => {
   console.error("Erro ao definir persistência do Firebase Auth:", err);
 });
 
-export const db = getFirestore(app, firestoreDatabaseId);
+export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
@@ -42,8 +29,28 @@ export async function getUserProfile(uid: string): Promise<UserProfile | null> {
 }
 
 export async function saveUserProfile(profile: UserProfile) {
-  const docRef = doc(db, 'users', profile.uid);
-  await setDoc(docRef, profile, { merge: true });
+  try {
+    const docRef = doc(db, 'users', profile.uid);
+    await setDoc(docRef, profile, { merge: true });
+  } catch (error) {
+    console.error("Erro ao salvar perfil:", error);
+    throw error;
+  }
+}
+
+export async function saveVideo(video: any) {
+  try {
+    const docRef = doc(collection(db, 'videos'));
+    await setDoc(docRef, {
+      ...video,
+      id: docRef.id,
+      createdAt: new Date()
+    });
+    return docRef.id;
+  } catch (error) {
+    console.error("Erro ao salvar vídeo:", error);
+    throw error;
+  }
 }
 
 export async function isUsernameAvailable(username: string, currentUid?: string): Promise<boolean> {

@@ -55,10 +55,10 @@ const MOCK_AUDIO_LIVE: LiveStream = {
     { uid: 's3', username: 'cloud_architect', photoURL: 'https://picsum.photos/seed/s3/100/100', isMuted: true, isVideoOff: true },
   ]
 };
-import { auth, getUserProfile, db } from './firebase';
+import { auth, getUserProfile, db, saveVideo } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
+import { query, collection, orderBy, limit, onSnapshot, doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { Loader2, Mic, Video as VideoIcon } from 'lucide-react';
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { cn } from './lib/utils';
 
 const MOCK_VIDEOS: Video[] = [
@@ -119,7 +119,25 @@ export default function App() {
   const [isCreatingVideo, setIsCreatingVideo] = useState(false);
   const [activeLive, setActiveLive] = useState<LiveStream | null>(null);
   const [showLiveSelection, setShowLiveSelection] = useState(false);
-  const [videos, setVideos] = useState<Video[]>(MOCK_VIDEOS);
+  const [videos, setVideos] = useState<Video[]>([]);
+
+  useEffect(() => {
+    const q = query(collection(db, 'videos'), orderBy('createdAt', 'desc'), limit(20));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const fetchedVideos = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toDate() || new Date()
+      } as Video));
+      
+      if (fetchedVideos.length > 0) {
+        setVideos(fetchedVideos);
+      } else {
+        setVideos(MOCK_VIDEOS);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     console.log("Iniciando onAuthStateChanged listener...");
@@ -278,24 +296,28 @@ export default function App() {
       {isCreatingVideo && (
         <CreateVideoFlow 
           onClose={() => setIsCreatingVideo(false)}
-          onPublish={(data) => {
+          onPublish={async (data) => {
             if (profile) {
-              const newVideo: Video = {
-                id: `v_${Date.now()}`,
-                creatorId: profile.uid,
-                creatorName: profile.username,
-                creatorPhoto: profile.photoURL,
-                videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-girl-in-neon-light-in-a-dark-room-2106-large.mp4', // Mock URL for now
-                thumbnailUrl: 'https://picsum.photos/seed/new_video/400/800',
-                description: data.caption,
-                musicName: 'Som Original',
-                likesCount: 0,
-                commentsCount: 0,
-                sharesCount: 0,
-                createdAt: new Date(),
-                tags: []
-              };
-              setVideos([newVideo, ...videos]);
+              try {
+                const videoData = {
+                  creatorId: profile.uid,
+                  creatorName: profile.username,
+                  creatorPhoto: profile.photoURL,
+                  videoUrl: 'https://assets.mixkit.co/videos/preview/mixkit-girl-in-neon-light-in-a-dark-room-2106-large.mp4', // Mock URL for now
+                  thumbnailUrl: 'https://picsum.photos/seed/new_video/400/800',
+                  description: data.caption,
+                  musicName: 'Som Original',
+                  likesCount: 0,
+                  commentsCount: 0,
+                  sharesCount: 0,
+                  tags: []
+                };
+                await saveVideo(videoData);
+                console.log("Vídeo publicado com sucesso!");
+              } catch (error) {
+                console.error("Erro ao publicar vídeo:", error);
+                alert("Erro ao publicar vídeo. Tente novamente.");
+              }
             }
             setIsCreatingVideo(false);
             setActiveTab('home');
